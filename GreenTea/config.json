@@ -1,0 +1,25 @@
+{
+    "log_path": "logs/greentea.log",
+    "listen_port": 9529,
+    "check_interval_sec": 3,
+    "processes": [
+        {
+            "name": "LemonTea",
+            "binary": "../bin/LemonTea",
+            "args": ["--config", "../LemonTea/config.json"],
+            "working_dir": ".",
+            "max_restarts": 10,
+            "restart_delay_sec": 2,
+            "auto_start": true
+        },
+        {
+            "name": "HoneyTea",
+            "binary": "../bin/HoneyTea",
+            "args": ["--config", "../HoneyTea/config.json"],
+            "working_dir": ".",
+            "max_restarts": 10,
+            "restart_delay_sec": 2,
+            "auto_start": true
+        }
+    ]
+}

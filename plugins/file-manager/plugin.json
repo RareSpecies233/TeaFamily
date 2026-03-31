@@ -1,0 +1,11 @@
+{
+  "name": "file-manager",
+  "version": "1.0.0",
+  "description": "远程文件管理插件",
+  "author": "TeaFamily",
+  "capabilities": ["file-browse", "file-upload", "file-download"],
+  "communication": "stdio",
+  "has_frontend": true,
+  "server_binary": "server/tea-plugin-fm-server",
+  "client_binary": "client/tea-plugin-fm-client"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "file-manager",
+  "version": "1.0.0",
+  "entry": "FileManagerView.vue",
+  "description": "远程文件管理器"
+}

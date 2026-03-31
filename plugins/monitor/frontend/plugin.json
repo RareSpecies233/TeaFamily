@@ -1,0 +1,6 @@
+{
+  "name": "monitor",
+  "version": "1.0.0",
+  "entry": "MonitorView.vue",
+  "description": "系统监控面板"
+}

@@ -1,0 +1,15 @@
+{
+    "node_id": "lemon-001",
+    "node_name": "LemonTea-Default",
+    "log_path": "logs/lemontea.log",
+    "tcp_port": 9527,
+    "http_port": 9528,
+    "udp_port": 9531,
+    "greentea_host": "127.0.0.1",
+    "greentea_port": 9529,
+    "plugins_dir": "plugins",
+    "heartbeat_interval_sec": 5,
+    "heartbeat_timeout_sec": 15,
+    "frontend_plugins_dir": "frontend_plugins",
+    "static_dir": "static"
+}

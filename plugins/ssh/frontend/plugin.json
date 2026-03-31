@@ -1,0 +1,6 @@
+{
+  "name": "ssh",
+  "version": "1.0.0",
+  "entry": "SSHView.vue",
+  "description": "SSH 远程终端"
+}

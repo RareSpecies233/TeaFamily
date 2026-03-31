@@ -1,0 +1,11 @@
+{
+  "name": "monitor",
+  "version": "1.0.0",
+  "description": "系统监控插件（CPU/内存/磁盘/温度）",
+  "author": "TeaFamily",
+  "capabilities": ["metrics", "realtime"],
+  "communication": "stdio",
+  "has_frontend": true,
+  "server_binary": "server/tea-plugin-monitor-server",
+  "client_binary": "client/tea-plugin-monitor-client"
+}

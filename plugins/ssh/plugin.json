@@ -1,0 +1,11 @@
+{
+  "name": "ssh",
+  "version": "1.0.0",
+  "description": "SSH 远程终端插件",
+  "author": "TeaFamily",
+  "capabilities": ["terminal", "command"],
+  "communication": "stdio",
+  "has_frontend": true,
+  "server_binary": "server/tea-plugin-ssh-server",
+  "client_binary": "client/tea-plugin-ssh-client"
+}

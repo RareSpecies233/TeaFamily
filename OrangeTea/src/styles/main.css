@@ -1,0 +1,23 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+#app {
+  height: 100%;
+}
+
+:root {
+  --tea-primary: #e6a23c;
+  --tea-success: #67c23a;
+  --tea-danger: #f56c6c;
+  --tea-info: #909399;
+  --tea-sidebar-bg: #1d1e1f;
+  --tea-sidebar-width: 220px;
+}

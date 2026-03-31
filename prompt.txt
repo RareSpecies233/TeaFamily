@@ -1,0 +1,77 @@
+请你写如下程序
+
+1. HoneyTea
+2. lemonTea
+3. GreenTea
+4. OrangeTea
+
+他们的功能分别如下：
+
+0. GreenTea:
+这是一个cpp守护程序，有如下功能：
+a. 监控HoneyTea或LemonTea（或其他指定的程序）的状态，如果发现它们崩溃或停止运行，GreenTea会自动重启它们。
+b. 记录被监控进程的状态变化和重启事件，并写入日志文件。
+c. 提供一个接口，允许上传并更新监控的程序的可执行文件（仅需本地实现即可，我会通过HoneyTea或LemonTea来本地调用这个接口来更新其自身）。
+d. 通过一个json来配置需要监控的程序列表和相关参数（如重启次数限制、日志文件路径等）。
+
+1. HoneyTea: 
+这是一个cpp写的进程管理程序的客户端，
+a. 他会连接到LemonTea（服务端），与其进行通信（默认TCP，子进程需要可使用udp）
+b. 他负责管理子进程，需要与子进程进行通信，获取子进程的状态，并根据需要启动或停止子进程。
+c. 如果子进程需要与LemonTea进行通信，HoneyTea会充当中介，转发消息（子进程可能会使用UDP协议与LemonTea通信）。
+d. HoneyTea在退出时会确保所有子进程都被正确地终止
+e. 子进程可以通过LemonTea通过网络发送给HoneyTea来安装
+f. 需要有详细的如何给honeytea编写与安装子进程的文档
+g. 需要可以向GreenTea发送自身的新版可执行文件来更新自身
+f. 他通过一个json来配置相关参数
+g. 他有完整的日志记录功能，记录所有重要事件和错误信息，并写入日志文件。
+
+2. LemonTea:
+这是一个cpp写的进程管理程序的服务端，
+a. 他本质上和HoneyTea逻辑类似
+b. 他会连接到HoneyTea（客户端），与其进行通信（默认TCP，子进程需要可使用udp）
+c. 他也有自身的子进程，并且和HoneyTea一样需要管理这些子进程的状态，并根据需要启动或停止它们。
+d. 他也会充当中介，转发消息（子进程可能会使用UDP协议与HoneyTea通信）。
+e. 他在退出时会确保所有子进程都被正确地终止
+f. 他有http接口，允许用户通过http接口来管理LeomonTea和HoneyTea的所用功能
+g. 他通过一个json来配置相关参数
+h. 他有完整的日志记录功能，记录所有重要事件和错误信息，并写入日志文件。
+i. 他可以和GreenTea进行通信，上传自身的新版可执行文件来更新自身（就像HoneyTea一样）
+j. 他支持所有HoneyTea支持的子进程，且HoneyTea也支持所有LemonTea支持的子进程（两者公用一套子进程接口）
+k. 用户可以通过http接口来安装和管理HoneyTea和LemonTea的子进程
+
+3. OrangeTea:
+这是一个vue3写的前端界面程序，
+a. 他是一个前端界面程序，提供一个用户友好的界面来管理HoneyTea和LemonTea，默认进入连接界面，用户可以输入LemonTea的http接口地址来连接到LemonTea。
+b. 他通过http接口与LemonTea进行通信，获取LemonTea和HoneyTea的信息，并展示在界面上。
+c. 他支持更新HoneyTea和LemonTea的可执行文件，通过http接口上传新的可执行文件来更新它们。
+d. 他提供一个用户友好的界面，允许用户管理HoneyTea和LemonTea的子进程，包括启动、停止和查看状态。
+e. 他通过一个json来配置相关参数，如LemonTea的http接口地址等。
+f. 他有完整的日志记录功能，记录所有重要事件和错误信息，并写入日志文件。
+g. 用户在前端通过上传插件 / 配置，动态给 Vue3 项目添加新页面、新功能，无需重新打包、无需改源码，纯前端动态加载，并且在主界面中显示其入口
+
+4. 子进程:
+a. 子进程可以是任何可执行文件，HoneyTea和LemonTea都可以管理这些子进程的启动、停止和状态监控。
+b. 子进程可以通过tcp或UDP协议在HoneyTea和LemonTea之间行通信，发送状态信息或接收控制命令。
+c. 子进程需要遵循一定的接口规范，以便HoneyTea和LemonTea能够正确地管理它们。
+d. 插件同时可以提供前端界面，用户可以在OrangeTea上同步安装前端文件来实现图形化控制插件的功能。
+
+
+请你写如下的子进程
+1. ssh插件，用户在LemonTea上安装服务端
+在HoneyTea上安装客户端
+在OrangeTea上安装前端界面
+可以实现用户在OrangeTea上通过图形界面来ssh到HoneyTea所在的设备
+
+2. 文件管理插件
+用户在LemonTea上安装服务端
+在HoneyTea上安装客户端
+在OrangeTea上安装前端界面
+可以实现用户在OrangeTea上通过图形界面来管理HoneyTea所在设备上的文件，包括浏览文件系统、上传下载文件、删除文件等操作。
+
+3. 监控插件
+用户在LemonTea上安装服务端
+在HoneyTea上安装客户端
+在OrangeTea上安装前端界面
+可以实现用户在OrangeTea上通过图形界面来监控HoneyTea所在设备的系统资源使用情况，包括CPU、内存、磁盘，温度等指标，并提供实时图表展示和历史数据查询功能。
+

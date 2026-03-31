@@ -1,0 +1,14 @@
+{
+    "node_id": "honey-001",
+    "node_name": "HoneyTea-Default",
+    "log_path": "logs/honeytea.log",
+    "server_host": "127.0.0.1",
+    "server_port": 9527,
+    "udp_port": 9530,
+    "greentea_host": "127.0.0.1",
+    "greentea_port": 9529,
+    "plugins_dir": "plugins",
+    "heartbeat_interval_sec": 5,
+    "reconnect_interval_sec": 3,
+    "max_reconnect_attempts": 0
+}
