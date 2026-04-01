@@ -1,4 +1,5 @@
 #include "tea/protocol.h"
+#include "tea/common.h"
 #include <arpa/inet.h>
 #include <cstring>
 #include <spdlog/spdlog.h>

@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as api from '@/api'
-import type { PluginInfo, FrontendPlugin } from '@/types'
 
 export interface PluginInfo {
   name: string

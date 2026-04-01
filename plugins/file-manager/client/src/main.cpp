@@ -70,10 +70,11 @@ static void handleList(const json& msg) {
             if (entry.is_regular_file()) {
                 item["size"] = entry.file_size();
             }
+            // Get modification time in a portable way
             auto ftime = fs::last_write_time(entry);
-            auto sctp = std::chrono::time_point_cast<std::chrono::seconds>(
-                std::chrono::file_clock::to_sys(ftime));
-            item["modified"] = sctp.time_since_epoch().count();
+            auto duration = ftime.time_since_epoch();
+            auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+            item["modified"] = seconds;
             entries.push_back(item);
         }
     } catch (const fs::filesystem_error& e) {

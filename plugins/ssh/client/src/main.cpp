@@ -16,6 +16,7 @@
 #include <cstring>
 #include <unistd.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <sys/ioctl.h>
 #include <nlohmann/json.hpp>

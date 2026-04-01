@@ -88,7 +88,7 @@ const plugins = computed(() => pluginStore.localPlugins)
 const clients = ref<any[]>([])
 
 const runningPlugins = computed(() =>
-  plugins.value.filter((p) => p.state === 'running').length
+  plugins.value.filter((p: any) => p.state === 'running').length
 )
 
 function stateType(state: string) {
