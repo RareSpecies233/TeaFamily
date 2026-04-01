@@ -19,11 +19,12 @@
 ```bash
 ./scripts/macOS_build_release.sh        # 正常构建并自动收集产物到 dist
 ./scripts/macOS_build_release.sh clean  # 清理再构建（删除 build-release 与 dist）
+sh ./scripts/macOS_build_release.sh clean  # 也支持用 sh 调用（脚本会自动切到 bash）
 ```
 
 脚本会自动检测 `npm`，若存在则进入 `OrangeTea` 并执行 `npm install`（若缺少 node_modules）和 `npm run build`，并把前端构建输出复制到 `dist/frontend`。
 
-> 新增：脚本现在优先尝试运行 `cmake --install`（如果 CMakeLists 有 `install()` 规则），若无安装规则则会使用回退策略在 `build-release` 中查找编译产物并复制到 `dist`，因此通常无需手动复制构建文件到 `dist`。
+> 新增：脚本不会再执行 `cmake --install`，避免第三方库把 `.h`、`.cmake` 等开发文件写入 `dist`。`dist` 只保留运行时相关内容（可执行文件、插件、配置、前端静态资源）。
 
 ## 关键步骤（逐步说明）
 
@@ -52,7 +53,7 @@
    - 复制各组件的 `config.json` 到 `dist/config/`（文件名按组件命名）。
   - 自动改写 `dist/config/GreenTea.json` 中被监控进程路径，确保默认指向 `dist/bin/LemonTea`、`dist/bin/HoneyTea` 和 `dist/config/*.json`，避免发布目录下路径不匹配。
 
-  如果以上常规模式无法找到产物，脚本会执行回退查找（使用 `find`），在 `build-release` 下查找匹配的可执行文件并复制到相应位置。这样可覆盖不同 CMake 输出布局导致的路径差异。
+  如果常规路径无法找到产物，脚本会执行回退查找（使用 `find`），在 `build-release` 下查找匹配的可执行文件并复制到相应位置。这样可覆盖不同 CMake 输出布局导致的路径差异。
 
 6. 构建前端
    - 如果可用 `npm`，会进入 `OrangeTea`：若 `node_modules` 缺失则先 `npm install`，再 `npm run build`，并把 `OrangeTea/dist/*` 拷贝到 `dist/frontend/`。

@@ -34,6 +34,7 @@ TeaFamily 是一套分布式进程管理系统，包含以下组件：
 ### macOS
 ```bash
 ./scripts/macOS_build_release.sh
+./scripts/macOS_build_release.sh clean # 清理构建
 ```
 
 更多脚本说明见 [macOS 构建脚本说明](docs/macOS_build_release.md)
@@ -66,6 +67,20 @@ npm install
 npm run dev      # 开发模式
 npm run build    # 生产构建
 ```
+
+### OrangeTea Vue3 调试工具（Vue DevTools）
+
+OrangeTea 已启用 Vue3 调试工具（`vite-plugin-vue-devtools`），开发模式下可在浏览器中更方便地调试组件状态。
+
+建议步骤：
+
+```bash
+cd OrangeTea
+npm install
+npm run dev
+```
+
+然后在浏览器打开 OrangeTea 页面，配合浏览器扩展 `Vue.js devtools`（Chrome/Edge/Firefox）进行组件树、Pinia 状态和响应式数据调试。
 
 ## 部署（构建后二进制的运行方式）
 
@@ -192,6 +207,14 @@ serve -s /opt/teafamily/frontend -l 8080
 ```
 
 ### 常见问题（FAQ）
+
+- 构建后为什么 `dist` 里会出现 `.h` / `.cmake` 文件？
+      - 这是因为执行了 `cmake --install`，某些依赖（如 httplib）会安装开发文件到前缀目录。
+      - 现在构建脚本已调整为不执行该步骤，并在打包阶段清理 `dist/include`、`dist/lib` 等目录，`dist` 只保留运行时文件。
+
+- 只启动 GreenTea 会自动拉起 LemonTea 和 HoneyTea 吗？
+      - 会，但前提是 `GreenTea` 配置中的 `processes[].auto_start=true`，并且 `binary` 与 `args` 路径正确。
+      - 当前构建脚本会自动改写 `dist/config/GreenTea.json`，默认指向 `dist/bin/LemonTea`、`dist/bin/HoneyTea` 和对应 `dist/config/*.json`，因此在 `dist` 目录下通常可直接由 GreenTea 托管拉起。
 
 - 树莓派部署（Raspberry Pi）
       - 可以把 `HoneyTea` 部署在树莓派上，但需要为目标架构（arm/arm64/armv7）编译相应的二进制。推荐直接在树莓派上运行构建脚本，或使用交叉编译并将对应平台的二进制复制到树莓派。

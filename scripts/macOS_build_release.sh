@@ -2,6 +2,11 @@
 # TeaFamily macOS Release Build Script
 # Usage: ./scripts/macOS_build_release.sh [clean]
 
+# Allow invoking with `sh script.sh ...` by re-execing with bash.
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec /usr/bin/env bash "$0" "$@"
+fi
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,14 +46,8 @@ cmake --build . --config Release -j "$NPROC"
 echo "[3/4] Collecting build artifacts..."
 mkdir -p "$INSTALL_DIR"/{bin,plugins,config}
 
-# Try to run `cmake --install` if the project provides install rules. This will
-# let CMake place targets into the specified prefix when supported.
-echo "[3.1/4] Running 'cmake --install' (if supported)..."
-if cmake --install . --config Release --prefix "$INSTALL_DIR" 2>/dev/null; then
-    echo "  -> cmake --install completed"
-else
-    echo "  -> cmake --install skipped or no install rules (continuing with fallback copies)"
-fi
+# Keep dist runtime-only (no headers/cmake metadata from third-party install rules).
+rm -rf "$INSTALL_DIR/include" "$INSTALL_DIR/lib" "$INSTALL_DIR/share" "$INSTALL_DIR/cmake"
 
 # Main executables
 for bin in GreenTea HoneyTea LemonTea; do
@@ -85,6 +84,25 @@ for plugin_manifest in "$PROJECT_ROOT"/plugins/*/plugin.json; do
     mkdir -p "$INSTALL_DIR/plugins/$plugin_name"
 
     if command -v python3 >/dev/null 2>&1; then
+        tmp_bins_file=$(mktemp)
+        python3 - "$plugin_manifest" > "$tmp_bins_file" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as f:
+    j = json.load(f)
+
+vals = []
+for key in ("binary", "server_binary", "client_binary"):
+    v = j.get(key)
+    if isinstance(v, str) and v:
+        vals.append(v)
+
+for v in vals:
+    print(v)
+PY
+
         while IFS= read -r rel_bin; do
             [[ -n "$rel_bin" ]] || continue
             dest="$INSTALL_DIR/plugins/$plugin_name/$rel_bin"
@@ -110,24 +128,9 @@ for plugin_manifest in "$PROJECT_ROOT"/plugins/*/plugin.json; do
             else
                 echo "  [WARN] plugin executable not found for $plugin_name: $rel_bin"
             fi
-        done < <(python3 - "$plugin_manifest" <<'PY'
-import json
-import sys
+        done < "$tmp_bins_file"
 
-path = sys.argv[1]
-with open(path, 'r', encoding='utf-8') as f:
-    j = json.load(f)
-
-vals = []
-for key in ("binary", "server_binary", "client_binary"):
-    v = j.get(key)
-    if isinstance(v, str) and v:
-        vals.append(v)
-
-for v in vals:
-    print(v)
-PY
-)
+        rm -f "$tmp_bins_file"
     else
         echo "  [WARN] python3 not found; plugin manifest-based executable copy skipped for $plugin_name"
     fi

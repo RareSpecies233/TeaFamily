@@ -9,6 +9,11 @@ import './styles/main.css'
 
 const app = createApp(App)
 
+// Allow Vue devtools during local development.
+if (import.meta.env.DEV) {
+  ;(app.config as any).devtools = true
+}
+
 app.use(createPinia())
 app.use(router)
 app.use(ElementPlus)
