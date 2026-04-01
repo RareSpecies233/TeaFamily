@@ -603,18 +603,68 @@ onMounted(refreshAll)
   flex-wrap: nowrap;
   gap: 6px;
   align-items: center;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: auto;
 }
 
 .action-btn {
-  flex: 0 0 auto;
-  min-width: 88px;
-  max-width: 160px;
-  padding: 6px 10px;
-  font-size: 13px;
+  flex: 1 1 1px;
+  min-width: 72px;
+  max-width: 110px;
+  padding: 5px 8px;
+  font-size: 11px;
   white-space: nowrap;
   justify-content: center;
   box-sizing: border-box;
+  text-overflow: ellipsis;
+  overflow: hidden;
 }
+
+.el-table th,
+.el-table td {
+  padding: 8px 6px;
+}
+
+.el-table-column {
+  white-space: nowrap;
+}
+
+.plugins-page .panel-card {
+  overflow-x: hidden;
+}
+
+@media (max-width: 1200px) {
+  .plugins-page .panel-card {
+    padding: 8px;
+  }
+  .el-table-column {
+    font-size: 12px;
+  }
+  .action-btn {
+    min-width: 64px;
+    max-width: 90px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 992px) {
+  .hero {
+    flex-wrap: wrap;
+  }
+  .hero-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .hero-actions .el-button,
+  .hero-actions .el-upload {
+    width: auto;
+  }
+  .el-table-column:nth-child(3),
+  .el-table-column:nth-child(4),
+  .el-table-column:nth-child(5) {
+    min-width: 80px;
+    max-width: 100px;
+  }
+}
+
 </style>
