@@ -408,6 +408,21 @@ void HoneyTea::handlePluginOutput(const std::string& plugin, const tea::json& ms
         if (server_conn_ && server_conn_->isConnected()) {
             server_conn_->send(tea::Message::makeChildMsg(target_plugin, target, data));
         }
+    } else if (!event.empty() && event != "ready" && event != "error" && event != "log") {
+        // Forward plugin action output back to LemonTea so frontend can consume
+        // SSH stream output, file manager result payloads, and monitor metrics.
+        std::string target = msg.value("target_node", msg.value("target", std::string("")));
+        std::string target_plugin = msg.value("target_plugin", plugin);
+        auto data = msg;
+        if (!data.is_object()) {
+            data = tea::json{{"value", data}};
+        }
+        data["from_plugin"] = plugin;
+        data["from_node"] = node_id_;
+
+        if (server_conn_ && server_conn_->isConnected()) {
+            server_conn_->send(tea::Message::makeChildMsg(target_plugin, target, data));
+        }
     } else if (event == "ready") {
         spdlog::info("Plugin '{}' is ready", plugin);
     } else if (event == "error") {

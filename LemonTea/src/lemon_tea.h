@@ -5,7 +5,9 @@
 #include <atomic>
 #include <thread>
 #include <map>
+#include <deque>
 #include <mutex>
+#include <condition_variable>
 #include <tea/common.h>
 #include <tea/config.h>
 #include <tea/tcp_server.h>
@@ -62,6 +64,17 @@ public:
     bool sendPluginMessage(const std::string& node_id, const std::string& plugin,
                           const tea::json& data);
 
+    // Plugin event stream for OrangeTea plugin UIs.
+    tea::json getPluginEvents(const std::string& plugin, uint64_t after_seq, size_t limit) const;
+    uint64_t currentPluginEventSeq() const;
+    bool waitPluginEventResponse(const std::string& plugin,
+                                 const std::string& request_id,
+                                 const std::vector<std::string>& expected_actions,
+                                 uint64_t after_seq,
+                                 int timeout_ms,
+                                 tea::json& response,
+                                 uint64_t* response_seq = nullptr) const;
+
     // Access to config for HTTP server setup
     const tea::Config& config() const { return config_; }
     const std::string& frontendPluginsDir() const { return frontend_plugins_dir_; }
@@ -72,6 +85,14 @@ private:
     void onClientDisconnect(tea::TcpConnection::Ptr conn);
     void heartbeatCheckLoop();
     void handlePluginOutput(const std::string& plugin, const tea::json& msg);
+    void recordPluginEvent(const std::string& plugin, const tea::json& msg);
+
+    struct PluginEvent {
+        uint64_t seq = 0;
+        int64_t timestamp = 0;
+        std::string plugin;
+        tea::json data;
+    };
 
     tea::Config config_;
     std::string node_id_;
@@ -97,6 +118,13 @@ private:
     mutable std::mutex clients_mutex_;
     std::map<std::string, ClientInfo> clients_;  // node_id -> info
     std::map<int, std::string> fd_to_node_;      // fd -> node_id
+
+    // Plugin event queue
+    mutable std::mutex plugin_events_mutex_;
+    mutable std::condition_variable plugin_events_cv_;
+    std::deque<PluginEvent> plugin_events_;
+    uint64_t plugin_event_seq_ = 0;
+    size_t plugin_event_capacity_ = 4000;
 
     // Heartbeat
     std::atomic<bool> running_{false};

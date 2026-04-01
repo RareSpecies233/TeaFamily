@@ -18,6 +18,8 @@
 #include <cstring>
 #include <cstdio>
 #include <array>
+#include <sys/utsname.h>
+#include <unistd.h>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
@@ -26,6 +28,7 @@
 #include <mach/mach_host.h>
 #include <sys/sysctl.h>
 #include <sys/mount.h>
+#include <sys/time.h>
 #elif defined(__linux__)
 #include <sys/statvfs.h>
 #include <sys/sysinfo.h>
@@ -188,6 +191,75 @@ static double getTemperature() {
 #endif
 }
 
+static json getSystemInfo() {
+    json info;
+
+    char hostname[256] = {0};
+    if (gethostname(hostname, sizeof(hostname) - 1) == 0) {
+        info["hostname"] = hostname;
+    } else {
+        info["hostname"] = "unknown";
+    }
+
+    struct utsname uts {};
+    if (uname(&uts) == 0) {
+        info["os"] = uts.sysname;
+        info["kernel"] = uts.release;
+        info["arch"] = uts.machine;
+    } else {
+        info["os"] = "unknown";
+        info["kernel"] = "unknown";
+        info["arch"] = "unknown";
+    }
+
+#ifdef __APPLE__
+    int cores = 0;
+    size_t cores_len = sizeof(cores);
+    if (sysctlbyname("hw.ncpu", &cores, &cores_len, nullptr, 0) == 0) {
+        info["cpu_cores"] = cores;
+    }
+
+    char model[256] = {0};
+    size_t model_len = sizeof(model);
+    if (sysctlbyname("machdep.cpu.brand_string", &model, &model_len, nullptr, 0) == 0) {
+        info["cpu_model"] = std::string(model);
+    }
+
+    struct timeval boottime {};
+    size_t bt_len = sizeof(boottime);
+    if (sysctlbyname("kern.boottime", &boottime, &bt_len, nullptr, 0) == 0) {
+        auto now = std::chrono::system_clock::now();
+        auto now_sec = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+        info["uptime_sec"] = std::max<int64_t>(0, now_sec - boottime.tv_sec);
+    }
+#elif defined(__linux__)
+    info["cpu_cores"] = std::thread::hardware_concurrency();
+
+    std::ifstream cpuinfo("/proc/cpuinfo");
+    std::string line;
+    while (std::getline(cpuinfo, line)) {
+        if (line.rfind("model name", 0) == 0) {
+            auto pos = line.find(':');
+            if (pos != std::string::npos) {
+                std::string model = line.substr(pos + 1);
+                while (!model.empty() && model.front() == ' ') {
+                    model.erase(model.begin());
+                }
+                info["cpu_model"] = model;
+            }
+            break;
+        }
+    }
+
+    struct sysinfo si {};
+    if (sysinfo(&si) == 0) {
+        info["uptime_sec"] = static_cast<int64_t>(si.uptime);
+    }
+#endif
+
+    return info;
+}
+
 static void collectorThread() {
     // Initial CPU read to prime the delta calculation
     getCpuUsage();
@@ -206,6 +278,7 @@ static void collectorThread() {
         metrics["memory"] = getMemoryInfo();
         metrics["disks"] = getDiskInfo();
         metrics["temperature"] = getTemperature();
+        metrics["system"] = getSystemInfo();
 
         sendMessage(metrics);
         std::this_thread::sleep_for(std::chrono::milliseconds(g_interval_ms));
@@ -216,6 +289,7 @@ static void handleMessage(const json& msg) {
     std::string action = msg.value("action", "");
 
     if (action == "start_collecting") {
+        std::string reqId = msg.value("request_id", "");
         g_interval_ms = msg.value("interval_ms", 1000);
         if (!g_collecting) {
             g_collecting = true;
@@ -223,14 +297,35 @@ static void handleMessage(const json& msg) {
             spdlog::info("Started metrics collection (interval={}ms)", g_interval_ms.load());
         }
 
+        if (!reqId.empty()) {
+            json ack;
+            ack["action"] = "success";
+            ack["request_id"] = reqId;
+            ack["message"] = "metrics collection started";
+            sendMessage(ack);
+        }
+
     } else if (action == "stop_collecting") {
+        std::string reqId = msg.value("request_id", "");
         g_collecting = false;
         spdlog::info("Stopped metrics collection");
 
+        if (!reqId.empty()) {
+            json ack;
+            ack["action"] = "success";
+            ack["request_id"] = reqId;
+            ack["message"] = "metrics collection stopped";
+            sendMessage(ack);
+        }
+
     } else if (action == "request_metrics") {
         // One-shot metrics request
+        std::string reqId = msg.value("request_id", "");
         json metrics;
         metrics["action"] = "metrics";
+        if (!reqId.empty()) {
+            metrics["request_id"] = reqId;
+        }
         auto now = std::chrono::system_clock::now();
         metrics["timestamp"] = std::chrono::duration_cast<std::chrono::seconds>(
             now.time_since_epoch()).count();
@@ -238,6 +333,7 @@ static void handleMessage(const json& msg) {
         metrics["memory"] = getMemoryInfo();
         metrics["disks"] = getDiskInfo();
         metrics["temperature"] = getTemperature();
+        metrics["system"] = getSystemInfo();
         sendMessage(metrics);
 
     } else if (action == "ping") {

@@ -72,19 +72,11 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="HoneyTea" min-width="220">
+        <el-table-column label="HoneyTea" width="130">
           <template #default="{ row }">
-            <div class="remote-cell">
-              <span>{{ remoteSummary(row) }}</span>
-              <el-tooltip
-                v-if="row.remoteStates.length"
-                effect="light"
-                placement="top"
-                :content="remoteTooltip(row)"
-              >
-                <el-tag size="small" type="info">节点详情</el-tag>
-              </el-tooltip>
-            </div>
+            <el-tag :type="remoteStateType(row.remoteState, row.remoteInstalled)" size="small">
+              {{ remoteStateLabel(row) }}
+            </el-tag>
           </template>
         </el-table-column>
 
@@ -96,12 +88,13 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" min-width="380">
+        <el-table-column label="操作" min-width="420">
           <template #default="{ row }">
             <div class="actions">
               <el-button
                 size="small"
                 type="success"
+                class="action-btn"
                 @click="startLocal(row.name)"
                 :disabled="!row.localInstalled || row.localState === 'running'"
               >
@@ -110,6 +103,7 @@
               <el-button
                 size="small"
                 type="warning"
+                class="action-btn"
                 @click="stopLocal(row.name)"
                 :disabled="!row.localInstalled || row.localState !== 'running'"
               >
@@ -117,26 +111,29 @@
               </el-button>
               <el-button
                 size="small"
-                @click="startRemoteAll(row)"
-                :disabled="row.remoteInstalled === 0"
+                class="action-btn"
+                @click="startRemote(row)"
+                :disabled="!row.remoteInstalled || row.remoteState === 'running'"
               >
                 启动远端
               </el-button>
               <el-button
                 size="small"
-                @click="stopRemoteAll(row)"
-                :disabled="row.remoteInstalled === 0"
+                class="action-btn"
+                @click="stopRemote(row)"
+                :disabled="!row.remoteInstalled || row.remoteState !== 'running'"
               >
                 停止远端
               </el-button>
               <el-button
                 size="small"
+                class="action-btn"
                 @click="openPlugin(row.name)"
                 :disabled="!row.frontendInstalled"
               >
                 打开页面
               </el-button>
-              <el-button size="small" type="danger" @click="deleteUnified(row)">
+              <el-button size="small" type="danger" class="action-btn" @click="deleteUnified(row)">
                 统一删除
               </el-button>
             </div>
@@ -217,10 +214,9 @@ interface UnifiedPluginRow {
   localInstalled: boolean
   localState: string
   frontendInstalled: boolean
-  remoteInstalled: number
-  remoteRunning: number
-  remoteTotal: number
-  remoteStates: Array<{ nodeId: string; state: string }>
+  remoteInstalled: boolean
+  remoteState: string
+  remoteNodeId: string
 }
 
 interface PluginPreviewInfo {
@@ -246,52 +242,46 @@ const selectedPackage = ref<File | null>(null)
 const previewInfo = ref<PluginPreviewInfo | null>(null)
 
 const connectedClients = computed(() => clients.value.filter((c) => c.connected))
+const primaryClient = computed(() => connectedClients.value[0] || null)
 const loading = computed(() => pluginStore.loading || refreshing.value)
 
 const pluginRows = computed<UnifiedPluginRow[]>(() => {
   const allNames = new Set<string>()
   const localMap = new Map(pluginStore.localPlugins.map((p) => [p.name, p]))
   const frontendMap = new Map(pluginStore.frontendPlugins.map((p) => [p.name, p]))
-  const remoteMap = new Map<string, Array<{ nodeId: string; state: string; version?: string; pluginType?: string }>>()
+  const remoteMap = new Map<string, { state: string; version?: string; pluginType?: string }>()
+
+  const remotePlugins = primaryClient.value?.plugins || []
 
   for (const local of pluginStore.localPlugins) allNames.add(local.name)
   for (const frontend of pluginStore.frontendPlugins) allNames.add(frontend.name)
 
-  for (const client of connectedClients.value) {
-    const plugins = client.plugins || []
-    for (const remote of plugins) {
-      if (!remote.name) continue
-      allNames.add(remote.name)
-      const list = remoteMap.get(remote.name) || []
-      list.push({
-        nodeId: client.node_id,
-        state: remote.state || 'unknown',
-        version: remote.version,
-        pluginType: remote.plugin_type,
-      })
-      remoteMap.set(remote.name, list)
-    }
+  for (const remote of remotePlugins) {
+    if (!remote.name) continue
+    allNames.add(remote.name)
+    remoteMap.set(remote.name, {
+      state: remote.state || 'unknown',
+      version: remote.version,
+      pluginType: remote.plugin_type,
+    })
   }
 
   return Array.from(allNames)
     .map((name) => {
       const local = localMap.get(name)
       const frontend = frontendMap.get(name)
-      const remoteStates = remoteMap.get(name) || []
-      const running = remoteStates.filter((s) => s.state === 'running').length
-      const sampleRemote = remoteStates[0]
+      const remote = remoteMap.get(name)
 
       return {
         name,
-        version: local?.version || frontend?.version || sampleRemote?.version || '-',
-        pluginType: local?.plugin_type || sampleRemote?.pluginType || 'distributed',
+        version: local?.version || frontend?.version || remote?.version || '-',
+        pluginType: local?.plugin_type || remote?.pluginType || 'distributed',
         localInstalled: Boolean(local),
         localState: local?.state || 'not-installed',
         frontendInstalled: Boolean(frontend),
-        remoteInstalled: remoteStates.length,
-        remoteRunning: running,
-        remoteTotal: connectedClients.value.length,
-        remoteStates,
+        remoteInstalled: Boolean(remote),
+        remoteState: remote?.state || (primaryClient.value ? 'not-installed' : 'offline'),
+        remoteNodeId: primaryClient.value?.node_id || '',
       }
     })
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -310,14 +300,19 @@ function localStateType(state: string) {
   return 'warning'
 }
 
-function remoteSummary(row: UnifiedPluginRow) {
-  if (row.remoteTotal === 0) return '暂无在线客户端'
-  if (row.remoteInstalled === 0) return `0/${row.remoteTotal} 已安装`
-  return `${row.remoteInstalled}/${row.remoteTotal} 已安装，${row.remoteRunning} 运行中`
+function remoteStateType(state: string, installed: boolean) {
+  if (!primaryClient.value) return 'info'
+  if (!installed) return 'warning'
+  if (state === 'running') return 'success'
+  if (state === 'stopped') return 'info'
+  if (state === 'crashed') return 'danger'
+  return 'warning'
 }
 
-function remoteTooltip(row: UnifiedPluginRow) {
-  return row.remoteStates.map((state) => `${state.nodeId}:${state.state}`).join(' | ')
+function remoteStateLabel(row: UnifiedPluginRow) {
+  if (!primaryClient.value) return '未连接'
+  if (!row.remoteInstalled) return '未安装'
+  return row.remoteState
 }
 
 function formatList(items?: string[]) {
@@ -383,22 +378,22 @@ async function stopLocal(name: string) {
   }
 }
 
-async function startRemoteAll(row: UnifiedPluginRow) {
-  if (!row.remoteStates.length) return
+async function startRemote(row: UnifiedPluginRow) {
+  if (!row.remoteInstalled || !row.remoteNodeId) return
   try {
-    await Promise.all(row.remoteStates.map((state) => api.startRemotePlugin(state.nodeId, row.name)))
-    ElMessage.success(`已向 ${row.remoteStates.length} 个客户端发送启动命令`)
+    await api.startRemotePlugin(row.remoteNodeId, row.name)
+    ElMessage.success('已向 HoneyTea 发送启动命令')
     await refreshAll()
   } catch {
     ElMessage.error('远端启动失败')
   }
 }
 
-async function stopRemoteAll(row: UnifiedPluginRow) {
-  if (!row.remoteStates.length) return
+async function stopRemote(row: UnifiedPluginRow) {
+  if (!row.remoteInstalled || !row.remoteNodeId) return
   try {
-    await Promise.all(row.remoteStates.map((state) => api.stopRemotePlugin(state.nodeId, row.name)))
-    ElMessage.success(`已向 ${row.remoteStates.length} 个客户端发送停止命令`)
+    await api.stopRemotePlugin(row.remoteNodeId, row.name)
+    ElMessage.success('已向 HoneyTea 发送停止命令')
     await refreshAll()
   } catch {
     ElMessage.error('远端停止失败')
@@ -425,14 +420,14 @@ async function deleteUnified(row: UnifiedPluginRow) {
     }
   }
 
-  for (const remote of row.remoteStates) {
+  if (row.remoteInstalled && row.remoteNodeId) {
     try {
-      if (remote.state === 'running') {
-        await api.stopRemotePlugin(remote.nodeId, row.name)
+      if (row.remoteState === 'running') {
+        await api.stopRemotePlugin(row.remoteNodeId, row.name)
       }
-      await api.deleteRemotePlugin(remote.nodeId, row.name)
+      await api.deleteRemotePlugin(row.remoteNodeId, row.name)
     } catch {
-      failures.push(`HoneyTea(${remote.nodeId}) 删除失败`)
+      failures.push(`HoneyTea(${row.remoteNodeId}) 删除失败`)
     }
   }
 
@@ -580,17 +575,14 @@ onMounted(refreshAll)
   color: #6e5d3f;
 }
 
-.remote-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+.actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(118px, 1fr));
+  gap: 6px;
 }
 
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+.action-btn {
+  width: 100%;
+  justify-content: center;
 }
 </style>

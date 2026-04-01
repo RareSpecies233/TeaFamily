@@ -35,14 +35,16 @@ static void handleMessage(const json& msg) {
 
     if (action == "metrics") {
         // Metrics data from client side
-        std::string nodeId = msg.value("node_id", "unknown");
+        std::string nodeId = msg.value("node_id", msg.value("from_node", std::string("unknown")));
+        json sample = msg;
+        sample["node_id"] = nodeId;
         auto& history = g_history[nodeId];
-        history.samples.push_back(msg);
+        history.samples.push_back(sample);
         if (history.samples.size() > MAX_HISTORY) {
             history.samples.pop_front();
         }
         // Forward to parent (for potential real-time streaming)
-        sendMessage(msg);
+        sendMessage(sample);
 
     } else if (action == "query_metrics") {
         // Query historical metrics for a node
@@ -69,8 +71,10 @@ static void handleMessage(const json& msg) {
         }
         sendMessage(result);
 
-    } else if (action == "request_metrics") {
-        // Request to start/stop collecting metrics from a node
+    } else if (action == "request_metrics" ||
+               action == "start_collecting" ||
+               action == "stop_collecting") {
+        // Forward collection controls and one-shot requests to client side.
         sendMessage(msg);
 
     } else if (action == "ping") {

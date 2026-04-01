@@ -79,6 +79,30 @@ export const installRemotePlugin = (nodeId: string, file: File, name?: string) =
 export const sendPluginMessage = (nodeId: string, plugin: string, data: any) =>
   client().post('/api/plugin-message', { node_id: nodeId, plugin, data })
 
+export const getPluginEvents = (plugin?: string, after = 0, limit = 200) =>
+  client().get('/api/plugin-events', {
+    params: {
+      plugin,
+      after,
+      limit,
+    },
+  })
+
+export const pluginRpc = (
+  nodeId: string,
+  plugin: string,
+  data: any,
+  timeoutMs = 3000,
+  expectedActions: string[] = []
+) =>
+  client().post('/api/plugin-rpc', {
+    node_id: nodeId,
+    plugin,
+    data,
+    timeout_ms: timeoutMs,
+    expected_actions: expectedActions,
+  })
+
 // Binary updates
 export const updateLemonTea = (file: File) => {
   const fd = new FormData()

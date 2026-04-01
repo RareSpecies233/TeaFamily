@@ -667,6 +667,96 @@ void HttpApi::setupRoutes() {
         }
     });
 
+    svr.Get("/api/plugin-events", [this](const httplib::Request& req, httplib::Response& res) {
+        std::string plugin = req.has_param("plugin") ? req.get_param_value("plugin") : "";
+
+        uint64_t after = 0;
+        size_t limit = 200;
+        try {
+            if (req.has_param("after")) {
+                after = std::stoull(req.get_param_value("after"));
+            }
+            if (req.has_param("limit")) {
+                limit = static_cast<size_t>(std::stoul(req.get_param_value("limit")));
+            }
+        } catch (...) {
+            res.status = 400;
+            res.set_content(R"({"error":"invalid query params"})", "application/json");
+            return;
+        }
+
+        auto payload = lemon_.getPluginEvents(plugin, after, limit);
+        res.set_content(payload.dump(), "application/json");
+    });
+
+    svr.Post("/api/plugin-rpc", [this](const httplib::Request& req, httplib::Response& res) {
+        static std::atomic<uint64_t> request_seq{0};
+
+        try {
+            auto body = json::parse(req.body);
+            std::string node_id = body.value("node_id", "");
+            std::string plugin = body.value("plugin", "");
+            auto data = body.value("data", json::object());
+            int timeout_ms = body.value("timeout_ms", 3000);
+
+            if (plugin.empty()) {
+                res.status = 400;
+                res.set_content(R"({"error":"missing plugin"})", "application/json");
+                return;
+            }
+
+            if (!data.is_object()) {
+                data = json{{"value", data}};
+            }
+
+            std::string request_id = data.value("request_id", std::string(""));
+            if (request_id.empty()) {
+                request_id = plugin + "-" + std::to_string(tea::nowMs()) + "-" +
+                             std::to_string(request_seq.fetch_add(1));
+                data["request_id"] = request_id;
+            }
+
+            std::vector<std::string> expected_actions;
+            if (body.contains("expected_actions") && body["expected_actions"].is_array()) {
+                for (const auto& item : body["expected_actions"]) {
+                    if (item.is_string()) {
+                        expected_actions.push_back(item.get<std::string>());
+                    }
+                }
+            }
+
+            uint64_t after_seq = lemon_.currentPluginEventSeq();
+            bool sent = lemon_.sendPluginMessage(node_id, plugin, data);
+            if (!sent) {
+                res.status = 502;
+                res.set_content(json{{"success", false}, {"error", "failed to send plugin message"}}.dump(),
+                                "application/json");
+                return;
+            }
+
+            json response_payload = json::object();
+            uint64_t matched_seq = 0;
+            bool matched = lemon_.waitPluginEventResponse(plugin,
+                                                          request_id,
+                                                          expected_actions,
+                                                          after_seq,
+                                                          timeout_ms,
+                                                          response_payload,
+                                                          &matched_seq);
+
+            res.set_content(json{{"success", sent},
+                                 {"matched", matched},
+                                 {"request_id", request_id},
+                                 {"response", response_payload},
+                                 {"response_seq", matched_seq}}
+                                .dump(),
+                            "application/json");
+        } catch (...) {
+            res.status = 400;
+            res.set_content(R"({"error":"invalid json"})", "application/json");
+        }
+    });
+
     // ===== Binary Update =====
     svr.Post("/api/update/lemon-tea", [this](const httplib::Request& req, httplib::Response& res) {
         if (!req.has_file("binary")) {

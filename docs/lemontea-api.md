@@ -69,6 +69,64 @@ Base URL 示例：`http://127.0.0.1:9528`
 }
 ```
 
+### GET /api/plugin-events
+查询插件事件流（用于 Web SSH 输出流、监控实时数据、文件操作回执）。
+
+查询参数：
+- `plugin`：插件名（可选）
+- `after`：仅返回序号大于该值的事件（可选，默认 0）
+- `limit`：本次最多返回数量（可选，默认 200）
+
+返回示例：
+```json
+{
+  "events": [
+    {
+      "seq": 1024,
+      "timestamp": 1775000000000,
+      "plugin": "ssh",
+      "data": {
+        "action": "output",
+        "session_id": "ssh-1775...",
+        "data": "..."
+      }
+    }
+  ],
+  "next_seq": 1030
+}
+```
+
+### POST /api/plugin-rpc
+向插件发送消息并等待匹配响应（按 `request_id` + `expected_actions` 匹配）。
+
+请求示例：
+```json
+{
+  "node_id": "honey-001",
+  "plugin": "file-manager",
+  "data": {
+    "action": "list",
+    "path": "/tmp"
+  },
+  "timeout_ms": 4000,
+  "expected_actions": ["list_result", "error"]
+}
+```
+
+响应示例：
+```json
+{
+  "success": true,
+  "matched": true,
+  "request_id": "file-manager-...",
+  "response": {
+    "action": "list_result",
+    "entries": []
+  },
+  "response_seq": 2051
+}
+```
+
 ## 程序更新
 ### POST /api/update/lemon-tea
 上传 LemonTea 新二进制，触发 GreenTea 自更新流程。

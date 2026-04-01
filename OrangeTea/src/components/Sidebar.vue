@@ -26,17 +26,20 @@
       </el-menu-item>
 
       <!-- Dynamic plugin entries -->
-      <el-sub-menu index="dynamic-plugins" v-if="pluginStore.frontendPlugins.length">
+      <el-sub-menu index="dynamic-plugins">
         <template #title>
           <el-icon><Grid /></el-icon>
           <span>插件页面</span>
         </template>
         <el-menu-item
-          v-for="plugin in pluginStore.frontendPlugins"
+          v-for="plugin in pluginPageEntries"
           :key="plugin.name"
           :index="`/plugin/${plugin.name}`"
         >
           <span>{{ plugin.title || plugin.name }}</span>
+        </el-menu-item>
+        <el-menu-item v-if="!pluginPageEntries.length" index="/plugins" disabled>
+          <span>暂无可用页面（请先安装）</span>
         </el-menu-item>
       </el-sub-menu>
     </el-menu>
@@ -103,12 +106,47 @@ const serverAddress = ref(connectionStore.serverUrl || 'http://127.0.0.1:9528')
 const statusType = computed(() => (connectionStore.connected ? 'success' : 'info'))
 const statusLabel = computed(() => (connectionStore.connected ? '在线' : '离线'))
 const displayServerUrl = computed(() => connectionStore.serverUrl || '未设置服务器地址')
+const pluginPageEntries = computed(() => {
+  const entries = new Map<string, { name: string; title: string }>()
+
+  for (const frontend of pluginStore.frontendPlugins) {
+    entries.set(frontend.name, {
+      name: frontend.name,
+      title: frontend.title || frontend.name,
+    })
+  }
+
+  for (const local of pluginStore.localPlugins) {
+    if (!local.has_frontend || entries.has(local.name)) continue
+    entries.set(local.name, {
+      name: local.name,
+      title: local.name,
+    })
+  }
+
+  return Array.from(entries.values()).sort((a, b) => a.name.localeCompare(b.name))
+})
+
+async function syncPluginEntries() {
+  if (!connectionStore.connected) return
+  await Promise.allSettled([pluginStore.fetchPlugins(), pluginStore.fetchFrontendPlugins()])
+}
 
 onMounted(() => {
-  if (connectionStore.connected) {
-    pluginStore.fetchFrontendPlugins()
-  }
+  syncPluginEntries()
 })
+
+watch(
+  () => connectionStore.connected,
+  (connected) => {
+    if (connected) {
+      syncPluginEntries()
+      return
+    }
+    pluginStore.localPlugins = []
+    pluginStore.frontendPlugins = []
+  }
+)
 
 watch(
   () => connectionStore.serverUrl,
@@ -131,14 +169,14 @@ function openConfig() {
 async function quickConnect() {
   const ok = await connectionStore.connect(serverAddress.value)
   if (ok) {
-    await pluginStore.fetchFrontendPlugins()
+    await syncPluginEntries()
   }
 }
 
 async function saveAndConnect() {
   const ok = await connectionStore.connect(serverAddress.value)
   if (!ok) return
-  await pluginStore.fetchFrontendPlugins()
+  await syncPluginEntries()
   configVisible.value = false
 }
 </script>

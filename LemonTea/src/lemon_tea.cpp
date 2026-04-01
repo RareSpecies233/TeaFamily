@@ -1,7 +1,9 @@
 #include "lemon_tea.h"
 #include <spdlog/spdlog.h>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <unordered_set>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -266,6 +268,10 @@ void LemonTea::heartbeatCheckLoop() {
 void LemonTea::handlePluginOutput(const std::string& plugin, const tea::json& msg) {
     std::string event = msg.value("event", msg.value("action", std::string("")));
 
+    if (event != "log") {
+        recordPluginEvent(plugin, msg);
+    }
+
     if (event == "message" || event == "plugin_message") {
         // target_plugin + target_node enables A->B plugin messaging on LemonTea or remote HoneyTea.
         std::string target_plugin = msg.value("target_plugin", msg.value("plugin", std::string("")));
@@ -296,6 +302,21 @@ void LemonTea::handlePluginOutput(const std::string& plugin, const tea::json& ms
     } else if (event == "error") {
         spdlog::error("Local plugin '{}' error: {}", plugin, msg.value("message", "unknown"));
     }
+}
+
+void LemonTea::recordPluginEvent(const std::string& plugin, const tea::json& msg) {
+    std::lock_guard<std::mutex> lock(plugin_events_mutex_);
+    PluginEvent event;
+    event.seq = ++plugin_event_seq_;
+    event.timestamp = tea::nowMs();
+    event.plugin = plugin;
+    event.data = msg;
+
+    plugin_events_.push_back(std::move(event));
+    while (plugin_events_.size() > plugin_event_capacity_) {
+        plugin_events_.pop_front();
+    }
+    plugin_events_cv_.notify_all();
 }
 
 bool LemonTea::startRemotePlugin(const std::string& node_id, const std::string& name) {
@@ -370,6 +391,112 @@ bool LemonTea::sendPluginMessage(const std::string& node_id, const std::string& 
     if (!conn) return false;
     conn->send(tea::Message::makeChildMsg(plugin, node_id, data));
     return true;
+}
+
+tea::json LemonTea::getPluginEvents(const std::string& plugin, uint64_t after_seq, size_t limit) const {
+    if (limit == 0) {
+        limit = 100;
+    }
+    limit = std::min(limit, static_cast<size_t>(1000));
+
+    tea::json events = tea::json::array();
+
+    std::lock_guard<std::mutex> lock(plugin_events_mutex_);
+    for (const auto& event : plugin_events_) {
+        if (event.seq <= after_seq) {
+            continue;
+        }
+        if (!plugin.empty() && event.plugin != plugin) {
+            continue;
+        }
+
+        events.push_back({
+            {"seq", event.seq},
+            {"timestamp", event.timestamp},
+            {"plugin", event.plugin},
+            {"data", event.data}
+        });
+
+        if (events.size() >= limit) {
+            break;
+        }
+    }
+
+    return tea::json{{"events", events}, {"next_seq", plugin_event_seq_}};
+}
+
+uint64_t LemonTea::currentPluginEventSeq() const {
+    std::lock_guard<std::mutex> lock(plugin_events_mutex_);
+    return plugin_event_seq_;
+}
+
+bool LemonTea::waitPluginEventResponse(const std::string& plugin,
+                                       const std::string& request_id,
+                                       const std::vector<std::string>& expected_actions,
+                                       uint64_t after_seq,
+                                       int timeout_ms,
+                                       tea::json& response,
+                                       uint64_t* response_seq) const {
+    std::unordered_set<std::string> action_set(expected_actions.begin(), expected_actions.end());
+
+    const auto matches = [&](const PluginEvent& event) {
+        if (event.seq <= after_seq) {
+            return false;
+        }
+        if (!plugin.empty() && event.plugin != plugin) {
+            return false;
+        }
+
+        if (!request_id.empty()) {
+            if (!event.data.contains("request_id") ||
+                event.data.value("request_id", std::string("")) != request_id) {
+                return false;
+            }
+        }
+
+        if (!action_set.empty()) {
+            const std::string action = event.data.value("action", event.data.value("event", std::string("")));
+            if (action_set.count(action) == 0) {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    auto findMatching = [&](tea::json& out, uint64_t* out_seq) {
+        for (const auto& event : plugin_events_) {
+            if (!matches(event)) {
+                continue;
+            }
+            out = event.data;
+            if (out_seq) {
+                *out_seq = event.seq;
+            }
+            return true;
+        }
+        return false;
+    };
+
+    std::unique_lock<std::mutex> lock(plugin_events_mutex_);
+    if (findMatching(response, response_seq)) {
+        return true;
+    }
+
+    if (timeout_ms < 0) {
+        timeout_ms = 0;
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+
+    while (true) {
+        if (plugin_events_cv_.wait_until(lock, deadline) == std::cv_status::timeout) {
+            return findMatching(response, response_seq);
+        }
+        if (findMatching(response, response_seq)) {
+            return true;
+        }
+    }
 }
 
 bool LemonTea::requestSelfUpdate(const std::string& new_binary_path) {
