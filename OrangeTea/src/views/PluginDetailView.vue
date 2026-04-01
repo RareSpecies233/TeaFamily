@@ -1,12 +1,19 @@
 <template>
   <div class="plugin-detail-page">
     <div class="page-header">
-      <el-button @click="router.back()" size="small">
+      <el-button class="header-btn" @click="router.back()" size="small">
         <el-icon><ArrowLeft /></el-icon>
         返回
       </el-button>
-      <h2>{{ pluginName }}</h2>
-      <el-button size="small" @click="loadPluginFrontend">刷新页面</el-button>
+
+      <div class="title-wrap">
+        <h2>{{ formattedTitle }}</h2>
+      </div>
+
+      <el-button class="header-btn" size="small" @click="loadPluginFrontend">
+        <el-icon><Refresh /></el-icon>
+        刷新
+      </el-button>
     </div>
 
     <el-skeleton :loading="loading" :rows="8" animated>
@@ -55,12 +62,14 @@ const route = useRoute()
 const router = useRouter()
 const connectionStore = useConnectionStore()
 const pluginName = ref(route.params.name as string)
+const navName = ref(route.params.name as string)
 const pluginUrl = ref('')
 const pluginApiBase = ref('/api')
 const loading = ref(true)
 const error = ref('')
 const errorHint = ref('')
 const loaderKey = computed(() => `${pluginName.value}:${pluginUrl.value}:${pluginApiBase.value}`)
+const formattedTitle = computed(() => `（${navName.value || pluginName.value}）${pluginName.value}`)
 
 function buildPluginUrl(name: string, entry: string) {
   const base = (connectionStore.serverUrl || '').replace(/\/+$/, '')
@@ -85,6 +94,7 @@ async function loadPluginFrontend() {
   error.value = ''
   errorHint.value = ''
   pluginUrl.value = ''
+  navName.value = pluginName.value
 
   try {
     const [frontendResp, localResp] = await Promise.all([
@@ -96,12 +106,14 @@ async function loadPluginFrontend() {
     const found = plugins.find((p: any) => p.name === pluginName.value)
 
     if (found) {
+      navName.value = found.title || found.name || pluginName.value
       const entry = found.entry || 'index.js'
       pluginUrl.value = buildPluginUrl(pluginName.value, entry)
       pluginApiBase.value = buildPluginApiBase()
     } else {
       const localPlugins: any[] = localResp?.data?.plugins || []
       const localFound = localPlugins.find((p: any) => p.name === pluginName.value)
+      navName.value = localFound?.name || pluginName.value
 
       if (localFound?.has_frontend) {
         error.value = '插件前端资源缺失或安装不完整'
@@ -127,6 +139,7 @@ watch(
   () => route.params.name,
   (value) => {
     pluginName.value = value as string
+    navName.value = value as string
     loadPluginFrontend()
   }
 )
@@ -144,22 +157,83 @@ onMounted(loadPluginFrontend)
 </script>
 
 <style scoped>
+.plugin-detail-page {
+  min-height: calc(100vh - 40px);
+}
+
 .plugin-detail-page .page-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
+  padding: 14px 16px;
   margin-bottom: 20px;
+  border-radius: 16px;
+  border: 1px solid #ead9bb;
+  background:
+    radial-gradient(circle at 12% 20%, rgba(255, 239, 190, 0.86), transparent 40%),
+    linear-gradient(135deg, #fff5df 0%, #ffefdc 42%, #ecfffb 100%);
+}
+
+.title-wrap {
+  text-align: center;
 }
 
 .plugin-detail-page h2 {
   margin: 0;
-  color: #333;
-  flex: 1;
+  color: #2f2310;
+  font-size: 20px;
+}
+
+.title-wrap p {
+  margin-top: 4px;
+  color: #7b6641;
+  font-size: 12px;
+}
+
+.header-btn {
+  min-width: 102px;
+  height: 36px;
+  border-radius: 11px;
+  border: 1px solid #dfcfb1;
+  background: rgba(255, 255, 255, 0.84);
+  color: #5f4922;
+  font-weight: 600;
+}
+
+.header-btn:hover,
+.header-btn:focus-visible {
+  border-color: #cfb887;
+  background: #fffdf8;
+}
+
+.header-btn:active {
+  border-color: #c9ae77;
+}
+
+:deep(.header-btn .el-icon) {
+  margin-right: 5px;
 }
 
 .recover-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+@media (max-width: 768px) {
+  .plugin-detail-page .page-header {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .title-wrap {
+    grid-column: 1 / -1;
+    order: -1;
+    text-align: left;
+  }
+
+  .header-btn {
+    min-width: 0;
+  }
 }
 </style>

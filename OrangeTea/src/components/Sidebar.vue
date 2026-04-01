@@ -1,67 +1,114 @@
 <template>
-  <div class="sidebar">
+  <div class="sidebar" :class="{ collapsed }">
     <div class="sidebar-header">
-      <span class="sidebar-logo">OT</span>
-      <div class="brand">
+      <span v-if="!collapsed" class="sidebar-logo">🍊</span>
+      <div v-if="!collapsed" class="brand">
         <span class="sidebar-title">OrangeTea</span>
         <span class="sidebar-subtitle">Plugin Console</span>
       </div>
+      <el-button
+        class="collapse-toggle"
+        text
+        :aria-label="collapsed ? '展开导航栏' : '折叠导航栏'"
+        @click="toggleCollapsed"
+      >
+        <el-icon>
+          <Expand v-if="collapsed" />
+          <Fold v-else />
+        </el-icon>
+      </el-button>
     </div>
 
     <el-menu
       :default-active="route.path"
       router
+      class="sidebar-menu"
       background-color="transparent"
       text-color="#6f6a5e"
       active-text-color="#1b1407"
     >
-      <el-menu-item index="/plugins">
+      <el-menu-item index="/plugins" class="static-menu-item">
         <el-icon><Box /></el-icon>
-        <span>插件管理</span>
+        <span v-if="!collapsed">插件管理</span>
       </el-menu-item>
 
-      <el-menu-item index="/update">
+      <el-menu-item index="/update" class="static-menu-item">
         <el-icon><Upload /></el-icon>
-        <span>版本更新</span>
+        <span v-if="!collapsed">版本更新</span>
       </el-menu-item>
 
-      <!-- Dynamic plugin entries -->
-      <el-sub-menu index="dynamic-plugins">
-        <template #title>
-          <el-icon><Grid /></el-icon>
-          <span>插件页面</span>
-        </template>
-        <el-menu-item
-          v-for="plugin in pluginPageEntries"
-          :key="plugin.name"
-          :index="`/plugin/${plugin.name}`"
-        >
-          <span>{{ plugin.title || plugin.name }}</span>
-        </el-menu-item>
-        <el-menu-item v-if="!pluginPageEntries.length" index="/plugins" disabled>
-          <span>暂无可用页面（请先安装）</span>
-        </el-menu-item>
-      </el-sub-menu>
+      <el-menu-item
+        v-for="plugin in pluginPageEntries"
+        :key="plugin.name"
+        :index="`/plugin/${plugin.name}`"
+        class="dynamic-menu-item"
+      >
+        <el-icon><Grid /></el-icon>
+        <span :class="{ 'plugin-mini-text': collapsed }">
+          {{ collapsed ? shortPluginLabel(plugin.title || plugin.name) : plugin.title || plugin.name }}
+        </span>
+      </el-menu-item>
+
+      <el-menu-item
+        v-if="!pluginPageEntries.length"
+        index="/plugins"
+        disabled
+        class="dynamic-menu-item"
+      >
+        <el-icon><Grid /></el-icon>
+        <span :class="{ 'plugin-mini-text': collapsed }">
+          {{ collapsed ? '暂无' : '暂无可用页面（请先安装）' }}
+        </span>
+      </el-menu-item>
     </el-menu>
 
     <div class="sidebar-footer">
-      <div class="connection-card" @click="openConfig">
-        <div class="connection-top">
-          <span class="connection-label">LemonTea 连接</span>
-          <el-tag :type="statusType" size="small">{{ statusLabel }}</el-tag>
-        </div>
-        <p class="server-url">{{ displayServerUrl }}</p>
-        <p v-if="connectionStore.error" class="connection-error">{{ connectionStore.error }}</p>
-      </div>
+      <el-tooltip
+        v-if="collapsed"
+        :content="`LemonTea：${statusLabel}（点击配置）`"
+        placement="right"
+      >
+        <button type="button" class="connection-mini" @click="openConfig">
+          <el-icon v-if="connectionStore.connected" class="status-icon online">
+            <CircleCheckFilled />
+          </el-icon>
+          <el-icon v-else class="status-icon offline">
+            <CircleCloseFilled />
+          </el-icon>
+        </button>
+      </el-tooltip>
 
-      <div class="connection-actions">
-        <el-button text type="primary" :loading="connectionStore.connecting" @click="quickConnect">
-          {{ connectionStore.connected ? '重新连接' : '立即连接' }}
-        </el-button>
-        <el-button v-if="connectionStore.connected" text type="danger" @click="handleDisconnect">
-          断开连接
-        </el-button>
-      </div>
+      <template v-else>
+        <div class="connection-card" @click="openConfig">
+          <div class="connection-top">
+            <span class="connection-label">LemonTea 连接</span>
+            <el-tag :type="statusType" size="small">{{ statusLabel }}</el-tag>
+          </div>
+          <p class="server-url">{{ displayServerUrl }}</p>
+          <p v-if="connectionStore.error" class="connection-error">{{ connectionStore.error }}</p>
+        </div>
+
+        <div class="connection-actions">
+          <el-button
+            class="action-button action-button--primary"
+            size="small"
+            :loading="connectionStore.connecting"
+            @click="quickConnect"
+          >
+            <el-icon><RefreshRight /></el-icon>
+            {{ connectionStore.connected ? '重新连接' : '立即连接' }}
+          </el-button>
+          <el-button
+            class="action-button action-button--danger"
+            size="small"
+            :disabled="!connectionStore.connected"
+            @click="handleDisconnect"
+          >
+            <el-icon><SwitchButton /></el-icon>
+            断开连接
+          </el-button>
+        </div>
+      </template>
     </div>
 
     <el-dialog v-model="configVisible" title="LemonTea 连接配置" width="460px">
@@ -100,6 +147,7 @@ import { usePluginStore } from '@/stores/plugins'
 const route = useRoute()
 const connectionStore = useConnectionStore()
 const pluginStore = usePluginStore()
+const collapsed = ref(localStorage.getItem('tea_sidebar_collapsed') === '1')
 const configVisible = ref(false)
 const serverAddress = ref(connectionStore.serverUrl || 'http://127.0.0.1:9528')
 
@@ -157,6 +205,14 @@ watch(
   }
 )
 
+watch(collapsed, (value) => {
+  localStorage.setItem('tea_sidebar_collapsed', value ? '1' : '0')
+})
+
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value
+}
+
 function handleDisconnect() {
   connectionStore.disconnect()
 }
@@ -179,6 +235,16 @@ async function saveAndConnect() {
   await syncPluginEntries()
   configVisible.value = false
 }
+
+function shortPluginLabel(value: string) {
+  const text = value.trim()
+  if (!text) return '--'
+  const chineseChars = text.match(/[\u4e00-\u9fff]/g)
+  if (chineseChars && chineseChars.length >= 2) {
+    return chineseChars.slice(0, 2).join('')
+  }
+  return text.slice(0, 2)
+}
 </script>
 
 <style scoped>
@@ -193,6 +259,12 @@ async function saveAndConnect() {
   flex-direction: column;
   height: 100vh;
   border-right: 1px solid #e6d7c0;
+  transition: width 220ms ease, min-width 220ms ease;
+}
+
+.sidebar.collapsed {
+  width: var(--tea-sidebar-collapsed-width);
+  min-width: var(--tea-sidebar-collapsed-width);
 }
 
 .sidebar-header {
@@ -201,6 +273,24 @@ async function saveAndConnect() {
   align-items: center;
   gap: 10px;
   border-bottom: 1px solid #e6d7c0;
+  position: relative;
+}
+
+.collapse-toggle {
+  margin-left: auto;
+  color: #6f5c3f;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+
+.sidebar.collapsed .sidebar-header {
+  justify-content: flex-end;
+  padding: 10px 8px;
+}
+
+.sidebar.collapsed .collapse-toggle {
+  margin-left: 0;
 }
 
 .sidebar-logo {
@@ -249,9 +339,39 @@ async function saveAndConnect() {
   box-shadow: 0 8px 20px rgba(102, 77, 31, 0.15);
 }
 
+:deep(.static-menu-item) {
+  justify-content: flex-start;
+}
+
+:deep(.dynamic-menu-item) {
+  justify-content: flex-start;
+}
+
+.plugin-mini-text {
+  letter-spacing: 0.6px;
+  font-weight: 700;
+}
+
+.sidebar.collapsed :deep(.static-menu-item) {
+  justify-content: center;
+  padding-left: 0 !important;
+}
+
+.sidebar.collapsed :deep(.static-menu-item .el-icon) {
+  margin-right: 0;
+}
+
+.sidebar.collapsed :deep(.dynamic-menu-item) {
+  padding-left: 14px !important;
+}
+
 .sidebar-footer {
   padding: 12px;
   border-top: 1px solid #e6d7c0;
+}
+
+.sidebar.collapsed .sidebar-footer {
+  padding: 10px 8px 14px;
 }
 
 .connection-card {
@@ -288,8 +408,59 @@ async function saveAndConnect() {
 }
 
 .connection-actions {
-  margin-top: 8px;
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.action-button {
+  width: 100%;
+  margin: 0;
+  border-radius: 10px;
+  border: 1px solid #dfcfb4;
+  background: rgba(255, 255, 255, 0.82);
+  color: #5a4725;
+  font-weight: 600;
+}
+
+.action-button:hover,
+.action-button:focus-visible {
+  background: #fffdf8;
+  border-color: #d4be96;
+}
+
+.action-button--primary {
+  color: #8e5a07;
+}
+
+.action-button--danger {
+  color: #b1464a;
+}
+
+.connection-mini {
+  width: 46px;
+  height: 46px;
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #dfcfb3;
+  border-radius: 14px;
+  background: rgba(255, 252, 245, 0.82);
+  padding: 0;
+  cursor: pointer;
+  margin: 0 auto;
+}
+
+.status-icon {
+  font-size: 24px;
+}
+
+.status-icon.online {
+  color: #369f6d;
+}
+
+.status-icon.offline {
+  color: #9f7c42;
 }
 </style>

@@ -22,6 +22,7 @@ html, body {
   --tea-danger: #d1494f;
   --tea-info: #7d7668;
   --tea-sidebar-width: 268px;
+  --tea-sidebar-collapsed-width: 94px;
 }
 
 .panel-card,

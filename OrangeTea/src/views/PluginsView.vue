@@ -333,6 +333,15 @@ async function refreshAll() {
   }
 }
 
+async function refreshAfterMutation() {
+  await refreshAll()
+  window.setTimeout(() => {
+    if (connectionStore.connected) {
+      refreshAll()
+    }
+  }, 450)
+}
+
 async function startLocal(name: string) {
   try {
     await pluginStore.startPlugin(name)
@@ -448,7 +457,7 @@ async function deleteUnified(row: UnifiedPluginRow) {
     }
   }
 
-  await refreshAll()
+  await refreshAfterMutation()
 
   if (failures.length) {
     ElMessage.warning(failures.join('；'))
@@ -502,7 +511,7 @@ async function confirmInstall() {
     confirmVisible.value = false
     selectedPackage.value = null
     previewInfo.value = null
-    await refreshAll()
+    await refreshAfterMutation()
   } catch {
     ElMessage.error('统一安装失败')
   } finally {

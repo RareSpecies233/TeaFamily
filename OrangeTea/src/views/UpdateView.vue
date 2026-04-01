@@ -1,7 +1,11 @@
 <template>
   <div class="update-page">
-    <h2>程序更新</h2>
-
+    <header class="hero">
+      <div class="hero-left">
+      <h2>程序更新</h2>
+      </div>
+    </header>
+    
     <el-row :gutter="20">
       <el-col :span="12">
         <el-card>
