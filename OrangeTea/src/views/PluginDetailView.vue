@@ -17,7 +17,12 @@
           show-icon
           style="margin-bottom: 16px"
         />
-        <PluginLoader v-if="pluginUrl" :url="pluginUrl" :plugin-name="pluginName" />
+        <PluginLoader
+          v-if="pluginUrl"
+          :url="pluginUrl"
+          :plugin-name="pluginName"
+          :api-base="pluginApiBase"
+        />
         <el-empty v-else-if="!error" description="该插件没有前端界面" />
       </template>
     </el-skeleton>
@@ -36,6 +41,7 @@ const router = useRouter()
 const connectionStore = useConnectionStore()
 const pluginName = ref(route.params.name as string)
 const pluginUrl = ref('')
+const pluginApiBase = ref('/api')
 const loading = ref(true)
 const error = ref('')
 
@@ -49,6 +55,14 @@ function buildPluginUrl(name: string, entry: string) {
   return `${base}/api/frontend-plugins/${encodedName}/${encodedEntry}`
 }
 
+function buildPluginApiBase() {
+  const base = (connectionStore.serverUrl || '').replace(/\/+$/, '')
+  if (!base) {
+    return '/api'
+  }
+  return `${base}/api`
+}
+
 async function loadPluginFrontend() {
   loading.value = true
   error.value = ''
@@ -59,6 +73,7 @@ async function loadPluginFrontend() {
     if (found) {
       const entry = found.entry || 'index.js'
       pluginUrl.value = buildPluginUrl(pluginName.value, entry)
+      pluginApiBase.value = buildPluginApiBase()
     } else {
       error.value = '未找到对应的前端插件'
     }

@@ -76,6 +76,11 @@ macOS 插件导出脚本：
 
 脚本会导出统一安装包（例如 `ssh-unified-macos.tar.gz`），用于 OrangeTea 的统一插件安装入口。
 
+默认 release 构建产物不会预装任何插件（`dist/plugins` 与 `dist/frontend_plugins` 初始为空），需通过 OrangeTea 上传统一插件包后安装。
+
+端到端在线测试记录：
+- [E2E 测试文档](docs/e2e-online-test.md)
+
 ## OrangeTea 前端
 
 ```bash

@@ -16,6 +16,7 @@ import { ref, onUnmounted, watch, h, render as vueRender } from 'vue'
 const props = defineProps<{
   url: string
   pluginName: string
+  apiBase?: string
 }>()
 
 const containerRef = ref<HTMLElement>()
@@ -38,7 +39,7 @@ async function loadPlugin() {
       // Plugin exports a mount function: mount(container, context)
       const ctx = {
         pluginName: props.pluginName,
-        apiBase: '/api',
+        apiBase: props.apiBase || '/api',
       }
       const unmount = await module.mount(containerRef.value, ctx)
       if (typeof unmount === 'function') {
@@ -48,7 +49,7 @@ async function loadPlugin() {
       // Plugin exports a Vue component
       const vnode = h(module.default, {
         pluginName: props.pluginName,
-        apiBase: '/api',
+        apiBase: props.apiBase || '/api',
       })
       vueRender(vnode, containerRef.value)
       cleanup = () => vueRender(null, containerRef.value!)

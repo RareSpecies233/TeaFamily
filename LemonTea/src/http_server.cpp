@@ -285,49 +285,13 @@ bool parseUnifiedMeta(const UploadedArchive& archive, UnifiedPackageMeta& meta, 
     return true;
 }
 
-std::vector<std::string> splitCsv(const std::string& value) {
-    std::vector<std::string> out;
-    std::stringstream ss(value);
-    std::string token;
-    while (std::getline(ss, token, ',')) {
-        token.erase(token.begin(), std::find_if(token.begin(), token.end(), [](unsigned char c) {
-            return !std::isspace(c);
-        }));
-        token.erase(std::find_if(token.rbegin(), token.rend(), [](unsigned char c) {
-            return !std::isspace(c);
-        }).base(), token.end());
-        if (!token.empty()) {
-            out.push_back(token);
-        }
-    }
-    return out;
-}
-
-std::vector<std::string> resolveRemoteTargets(const LemonTea& lemon,
-                                              const std::string& target_mode,
-                                              const std::string& node_ids_csv) {
+std::vector<std::string> connectedHoneyNodes(const LemonTea& lemon) {
     std::vector<std::string> connected_nodes;
     for (const auto& client : lemon.getClients()) {
         if (client.connected) {
             connected_nodes.push_back(client.node_id);
         }
     }
-
-    if (target_mode == "none") {
-        return {};
-    }
-
-    if (!node_ids_csv.empty()) {
-        auto requested = splitCsv(node_ids_csv);
-        std::vector<std::string> selected;
-        for (const auto& node_id : requested) {
-            if (std::find(connected_nodes.begin(), connected_nodes.end(), node_id) != connected_nodes.end()) {
-                selected.push_back(node_id);
-            }
-        }
-        return selected;
-    }
-
     return connected_nodes;
 }
 
@@ -413,6 +377,8 @@ void HttpApi::setupRoutes() {
     svr.Get(R"(/api/clients/(\w[\w-]*)/plugins)", [this](const httplib::Request& req, httplib::Response& res) {
         auto node_id = req.matches[1].str();
         lemon_.requestRemotePluginList(node_id);
+        // Give HoneyTea a short time to respond so the frontend gets fresher state.
+        std::this_thread::sleep_for(std::chrono::milliseconds(160));
         // Return cached
         for (const auto& c : lemon_.getClients()) {
             if (c.node_id == node_id) {
@@ -486,6 +452,68 @@ void HttpApi::setupRoutes() {
         res.set_content(json{{"success", ok}, {"name", name}}.dump(), "application/json");
     });
 
+    svr.Post("/api/plugins/inspect", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!req.has_file("plugin")) {
+            res.status = 400;
+            res.set_content(R"({"error":"missing plugin file"})", "application/json");
+            return;
+        }
+
+        auto file = req.get_file_value("plugin");
+        std::string parse_error;
+        auto archive = unpackArchive(file.content, "tea_inspect_plugin_", parse_error);
+        if (!archive) {
+            res.status = 400;
+            res.set_content(json{{"error", parse_error}}.dump(), "application/json");
+            return;
+        }
+
+        UnifiedPackageMeta meta;
+        if (!parseUnifiedMeta(*archive, meta, parse_error)) {
+            cleanupArchive(*archive);
+            res.status = 400;
+            res.set_content(json{{"error", parse_error}}.dump(), "application/json");
+            return;
+        }
+
+        auto root_manifest = readJsonFile(archive->package_root / "plugin.json", parse_error);
+        if (!root_manifest) {
+            cleanupArchive(*archive);
+            res.status = 400;
+            res.set_content(json{{"error", "invalid plugin manifest: " + parse_error}}.dump(), "application/json");
+            return;
+        }
+
+        json frontend_manifest = json::object();
+        if (fs::exists(archive->package_root / "frontend" / "plugin.json")) {
+            auto frontend = readJsonFile(archive->package_root / "frontend" / "plugin.json", parse_error);
+            if (frontend) {
+                frontend_manifest = *frontend;
+            }
+        }
+
+        auto connected_nodes = connectedHoneyNodes(lemon_);
+        json info = {
+            {"name", meta.name},
+            {"version", meta.version},
+            {"plugin_type", meta.plugin_type},
+            {"description", root_manifest->value("description", std::string(""))},
+            {"author", root_manifest->value("author", std::string(""))},
+            {"depends_on", root_manifest->value("depends_on", json::array())},
+            {"capabilities", root_manifest->value("capabilities", json::array())},
+            {"has_frontend", meta.has_frontend},
+            {"frontend", frontend_manifest},
+            {"distribution_targets", json::array({"LemonTea", "HoneyTea", "OrangeTea"})},
+            {"connected_honey_nodes", connected_nodes},
+            {"connected_honey_count", connected_nodes.size()},
+            {"file_name", file.filename},
+            {"file_size", file.content.size()}
+        };
+
+        cleanupArchive(*archive);
+        res.set_content(json{{"success", true}, {"plugin", info}}.dump(), "application/json");
+    });
+
     svr.Post("/api/plugins/install-unified", [this](const httplib::Request& req, httplib::Response& res) {
         if (!req.has_file("plugin")) {
             res.status = 400;
@@ -512,41 +540,32 @@ void HttpApi::setupRoutes() {
 
         std::vector<uint8_t> runtime_data(file.content.begin(), file.content.end());
 
-        bool local_ok = true;
-        if (meta.plugin_type != "honey-only") {
-            local_ok = lemon_.installPlugin(meta.name, runtime_data);
-        }
+        bool local_ok = lemon_.installPlugin(meta.name, runtime_data);
 
-        bool frontend_ok = true;
+        bool frontend_ok = false;
         std::string frontend_name;
-        if (meta.has_frontend) {
-            auto frontend = installFrontendFromArchive(*archive, lemon_.frontendPluginsDir(), meta.name);
-            frontend_ok = frontend.success;
-            frontend_name = frontend.name;
-            if (!frontend_ok) {
-                spdlog::warn("Unified frontend install failed for {}: {}", meta.name, frontend.error);
-            }
+        std::string frontend_error;
+        auto frontend = installFrontendFromArchive(*archive, lemon_.frontendPluginsDir(), meta.name);
+        frontend_ok = frontend.success;
+        frontend_name = frontend.name;
+        frontend_error = frontend.error;
+        if (!frontend_ok) {
+            spdlog::warn("Unified frontend install failed for {}: {}", meta.name, frontend_error);
         }
-
-        std::string target_mode = req.has_param("target_clients")
-            ? req.get_param_value("target_clients")
-            : "all";
-        std::string node_ids = req.has_param("node_ids") ? req.get_param_value("node_ids") : "";
 
         std::vector<json> remote_results;
         bool remote_ok = true;
         std::vector<std::string> warnings;
 
-        if (meta.plugin_type != "lemon-only") {
-            auto targets = resolveRemoteTargets(lemon_, target_mode, node_ids);
-            if (targets.empty()) {
-                warnings.push_back("no online HoneyTea clients selected");
-            }
-            for (const auto& node_id : targets) {
-                bool ok = lemon_.installRemotePlugin(node_id, meta.name, runtime_data);
-                remote_results.push_back({{"node_id", node_id}, {"success", ok}});
-                remote_ok = remote_ok && ok;
-            }
+        auto targets = connectedHoneyNodes(lemon_);
+        if (targets.empty()) {
+            remote_ok = false;
+            warnings.push_back("no online HoneyTea clients, remote install skipped");
+        }
+        for (const auto& node_id : targets) {
+            bool ok = lemon_.installRemotePlugin(node_id, meta.name, runtime_data);
+            remote_results.push_back({{"node_id", node_id}, {"success", ok}});
+            remote_ok = remote_ok && ok;
         }
 
         cleanupArchive(*archive);
@@ -560,6 +579,7 @@ void HttpApi::setupRoutes() {
             {"local_installed", local_ok},
             {"frontend_installed", frontend_ok},
             {"frontend_name", frontend_name},
+            {"frontend_error", frontend_error},
             {"remote_results", remote_results},
             {"warnings", warnings}
         }.dump(), "application/json");

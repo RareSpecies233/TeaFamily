@@ -78,67 +78,9 @@ for bin in GreenTea HoneyTea LemonTea; do
     fi
 done
 
-# Plugin executables
-# Prefer manifest-declared paths (binary/server_binary/client_binary). This keeps
-# runtime layout consistent with plugin.json and avoids manual copies.
-echo "[3.2/4] Collecting plugin executables from manifests..."
-for plugin_manifest in "$PROJECT_ROOT"/plugins/*/plugin.json; do
-    [[ -f "$plugin_manifest" ]] || continue
-    plugin_name=$(basename "$(dirname "$plugin_manifest")")
-    mkdir -p "$INSTALL_DIR/plugins/$plugin_name"
-
-    if command -v python3 >/dev/null 2>&1; then
-        tmp_bins_file=$(mktemp)
-        python3 - "$plugin_manifest" > "$tmp_bins_file" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, 'r', encoding='utf-8') as f:
-    j = json.load(f)
-
-vals = []
-for key in ("binary", "server_binary", "client_binary"):
-    v = j.get(key)
-    if isinstance(v, str) and v:
-        vals.append(v)
-
-for v in vals:
-    print(v)
-PY
-
-        while IFS= read -r rel_bin; do
-            [[ -n "$rel_bin" ]] || continue
-            dest="$INSTALL_DIR/plugins/$plugin_name/$rel_bin"
-            mkdir -p "$(dirname "$dest")"
-
-            src_name=$(basename "$rel_bin")
-            src=""
-
-            # Common output location for plugin targets
-            if [[ -f "$BUILD_DIR/bin/$src_name" ]]; then
-                src="$BUILD_DIR/bin/$src_name"
-            elif [[ -f "$BUILD_DIR/$src_name" ]]; then
-                src="$BUILD_DIR/$src_name"
-            else
-                # Fallback: search entire build tree
-                src=$(find "$BUILD_DIR" -type f -name "$src_name" -perm -111 -print -quit 2>/dev/null || true)
-            fi
-
-            if [[ -n "$src" && -f "$src" ]]; then
-                cp "$src" "$dest"
-                chmod +x "$dest" || true
-                echo "  -> plugin: $plugin_name/$rel_bin"
-            else
-                echo "  [WARN] plugin executable not found for $plugin_name: $rel_bin"
-            fi
-        done < "$tmp_bins_file"
-
-        rm -f "$tmp_bins_file"
-    else
-        echo "  [WARN] python3 not found; plugin manifest-based executable copy skipped for $plugin_name"
-    fi
-done
+echo "[3.2/4] Keeping dist plugin directory empty by default..."
+rm -rf "$INSTALL_DIR/plugins"
+mkdir -p "$INSTALL_DIR/plugins"
 
 # Config files
 for cfg in GreenTea/config.json HoneyTea/config.json LemonTea/config.json; do
@@ -175,22 +117,6 @@ with open(path, 'w', encoding='utf-8') as f:
 PY
     echo "  -> normalized GreenTea.json process paths for dist layout"
 fi
-
-# Plugin manifests
-for manifest in "$PROJECT_ROOT"/plugins/*/plugin.json; do
-    plugin_name=$(basename "$(dirname "$manifest")")
-    mkdir -p "$INSTALL_DIR/plugins/$plugin_name"
-    cp "$manifest" "$INSTALL_DIR/plugins/$plugin_name/"
-done
-
-# Frontend plugin files
-for frontend_dir in "$PROJECT_ROOT"/plugins/*/frontend; do
-    plugin_name=$(basename "$(dirname "$frontend_dir")")
-    if [[ -d "$frontend_dir" ]]; then
-        mkdir -p "$INSTALL_DIR/plugins/$plugin_name/frontend"
-        cp -r "$frontend_dir"/* "$INSTALL_DIR/plugins/$plugin_name/frontend/"
-    fi
-done
 
 echo ""
 echo "[4/4] Building OrangeTea frontend..."

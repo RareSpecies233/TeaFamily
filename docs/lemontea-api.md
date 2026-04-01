@@ -46,12 +46,15 @@ Base URL 示例：`http://127.0.0.1:9528`
 - 字段：`plugin`（文件），`name`（可选）
 
 ### POST /api/plugins/install-unified
-统一安装插件（推荐）：自动识别并分发到 LemonTea/HoneyTea/前端插件目录。
+统一安装插件（推荐）：固定分发到 LemonTea + 所有在线 HoneyTea + OrangeTea 前端目录。
 - `multipart/form-data`
-- 字段：
-  - `plugin`：统一插件包（必填）
-  - `target_clients`：`all` / `selected` / `none`（可选，默认 `all`）
-  - `node_ids`：逗号分隔客户端 ID（可选，仅 `selected` 时生效）
+- 字段：`plugin`（统一插件包，必填）
+
+### POST /api/plugins/inspect
+统一安装前预览插件信息（用于前端确认弹窗）。
+- `multipart/form-data`
+- 字段：`plugin`（统一插件包，必填）
+- 返回：插件名称、版本、描述、能力、依赖、在线 HoneyTea 数量等。
 
 ## 插件消息转发
 ### POST /api/plugin-message

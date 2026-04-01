@@ -178,6 +178,22 @@ void LemonTea::onClientMessage(tea::TcpConnection::Ptr conn, const tea::Message&
             spdlog::info("Plugin {} {}: {}",
                         name, msg.type == tea::MsgType::PLUGIN_START_ACK ? "start" : "stop",
                         success ? "ok" : "failed");
+            // Keep client-side plugin status fresh in cached list for frontend polling.
+            conn->send(tea::Message::makePluginListReq());
+            break;
+        }
+
+        case tea::MsgType::PLUGIN_INSTALL_ACK: {
+            std::string name = msg.payload.value("name", "");
+            if (msg.payload.contains("ready") && msg.payload.value("ready", false) &&
+                !msg.payload.contains("success")) {
+                spdlog::info("Plugin {} install transfer ready", name);
+                break;
+            }
+
+            bool success = msg.payload.value("success", false);
+            spdlog::info("Plugin {} install: {}", name, success ? "ok" : "failed");
+            conn->send(tea::Message::makePluginListReq());
             break;
         }
 

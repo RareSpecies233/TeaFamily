@@ -2,7 +2,7 @@
   <div class="plugins-page">
     <header class="hero">
       <h2>统一插件管理台</h2>
-      <p>单入口管理插件安装、分发、运行与前端页面，无需再区分 LemonTea / HoneyTea / OrangeTea。</p>
+      <p>插件包上传后将固定安装到 LemonTea、HoneyTea 与 OrangeTea 三端，不再区分分发策略。</p>
     </header>
 
     <el-alert
@@ -25,46 +25,23 @@
       </template>
 
       <p class="install-tip">
-        上传一个插件包（.tar.gz），系统会自动识别插件类型并统一分发：
-        <strong>服务端运行时 + 客户端运行时 + 前端页面</strong>。
+        上传统一插件包（.tar.gz）后会先展示插件信息，确认后执行安装。
       </p>
-
-      <div class="install-options">
-        <span class="option-label">HoneyTea 分发范围：</span>
-        <el-radio-group v-model="installTargetMode">
-          <el-radio-button label="all">全部在线客户端</el-radio-button>
-          <el-radio-button label="selected">指定客户端</el-radio-button>
-          <el-radio-button label="none">不分发客户端</el-radio-button>
-        </el-radio-group>
-      </div>
-
-      <el-select
-        v-if="installTargetMode === 'selected'"
-        v-model="selectedClientIds"
-        multiple
-        collapse-tags
-        collapse-tags-tooltip
-        placeholder="选择要分发的 HoneyTea 客户端"
-        class="client-select"
-      >
-        <el-option
-          v-for="client in connectedClients"
-          :key="client.node_id"
-          :label="`${client.node_id} (${client.address}:${client.port})`"
-          :value="client.node_id"
-        />
-      </el-select>
 
       <el-upload
         :auto-upload="false"
         :show-file-list="false"
         accept=".tar.gz,.tgz"
-        :disabled="installDisabled"
-        @change="handleUnifiedInstall"
+        :disabled="!connectionStore.connected || installing || previewLoading"
+        @change="handleSelectPackage"
       >
-        <el-button type="primary" :loading="installing" :disabled="installDisabled">
+        <el-button
+          type="primary"
+          :loading="installing || previewLoading"
+          :disabled="!connectionStore.connected || installing || previewLoading"
+        >
           <el-icon><Upload /></el-icon>
-          上传并统一安装
+          上传并预览
         </el-button>
       </el-upload>
     </el-card>
@@ -167,6 +144,46 @@
         </el-table-column>
       </el-table>
     </el-card>
+
+    <el-dialog v-model="confirmVisible" title="确认安装插件" width="560px">
+      <el-skeleton :loading="previewLoading" :rows="5" animated>
+        <template #default>
+          <el-descriptions border :column="1" size="small">
+            <el-descriptions-item label="插件名称">{{ previewInfo?.name || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="版本">{{ previewInfo?.version || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="描述">{{ previewInfo?.description || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="插件类型">{{ pluginTypeLabel(previewInfo?.plugin_type) }}</el-descriptions-item>
+            <el-descriptions-item label="安装目标">
+              LemonTea + HoneyTea + OrangeTea（固定三端）
+            </el-descriptions-item>
+            <el-descriptions-item label="在线 HoneyTea 数量">
+              {{ previewInfo?.connected_honey_count ?? 0 }}
+            </el-descriptions-item>
+            <el-descriptions-item label="能力声明">
+              {{ formatList(previewInfo?.capabilities) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="依赖插件">
+              {{ formatList(previewInfo?.depends_on) }}
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <el-alert
+            v-if="(previewInfo?.connected_honey_count ?? 0) === 0"
+            title="当前没有在线 HoneyTea，确认后仍会安装 LemonTea 与前端，HoneyTea 侧会标记未完成。"
+            type="warning"
+            :closable="false"
+            style="margin-top: 12px"
+          />
+        </template>
+      </el-skeleton>
+
+      <template #footer>
+        <el-button @click="cancelPreview">取消</el-button>
+        <el-button type="primary" :loading="installing" @click="confirmInstall">
+          确认安装
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -206,23 +223,30 @@ interface UnifiedPluginRow {
   remoteStates: Array<{ nodeId: string; state: string }>
 }
 
+interface PluginPreviewInfo {
+  name: string
+  version: string
+  description: string
+  plugin_type: string
+  connected_honey_count: number
+  capabilities: string[]
+  depends_on: string[]
+}
+
 const router = useRouter()
 const connectionStore = useConnectionStore()
 const pluginStore = usePluginStore()
 
 const clients = ref<ClientInfo[]>([])
 const refreshing = ref(false)
+const previewLoading = ref(false)
 const installing = ref(false)
-const installTargetMode = ref<'all' | 'selected' | 'none'>('all')
-const selectedClientIds = ref<string[]>([])
+const confirmVisible = ref(false)
+const selectedPackage = ref<File | null>(null)
+const previewInfo = ref<PluginPreviewInfo | null>(null)
 
 const connectedClients = computed(() => clients.value.filter((c) => c.connected))
 const loading = computed(() => pluginStore.loading || refreshing.value)
-const installDisabled = computed(() => {
-  if (!connectionStore.connected || installing.value) return true
-  if (installTargetMode.value === 'selected' && selectedClientIds.value.length === 0) return true
-  return false
-})
 
 const pluginRows = computed<UnifiedPluginRow[]>(() => {
   const allNames = new Set<string>()
@@ -296,9 +320,30 @@ function remoteTooltip(row: UnifiedPluginRow) {
   return row.remoteStates.map((state) => `${state.nodeId}:${state.state}`).join(' | ')
 }
 
+function formatList(items?: string[]) {
+  if (!items || items.length === 0) return '-'
+  return items.join(', ')
+}
+
 async function fetchClients() {
   const resp = await api.getClients()
-  clients.value = resp.data.clients || []
+  const list: ClientInfo[] = resp.data.clients || []
+
+  const detailed = await Promise.all(
+    list.map(async (client) => {
+      if (!client.connected) {
+        return { ...client, plugins: [] }
+      }
+      try {
+        const pluginResp = await api.getClientPlugins(client.node_id)
+        return { ...client, plugins: pluginResp.data.plugins || [] }
+      } catch {
+        return { ...client, plugins: client.plugins || [] }
+      }
+    })
+  )
+
+  clients.value = detailed
 }
 
 async function refreshAll() {
@@ -408,18 +453,36 @@ async function deleteUnified(row: UnifiedPluginRow) {
   }
 }
 
-async function handleUnifiedInstall(uploadFile: UploadFile) {
+async function handleSelectPackage(uploadFile: UploadFile) {
   if (!uploadFile.raw) return
 
-  const nodeIds = installTargetMode.value === 'selected' ? selectedClientIds.value : []
-  if (installTargetMode.value === 'selected' && nodeIds.length === 0) {
-    ElMessage.warning('请先选择至少一个客户端')
-    return
+  previewLoading.value = true
+  try {
+    selectedPackage.value = uploadFile.raw
+    const resp = await api.inspectUnifiedPlugin(uploadFile.raw)
+    previewInfo.value = resp.data?.plugin || null
+    confirmVisible.value = true
+  } catch {
+    selectedPackage.value = null
+    previewInfo.value = null
+    ElMessage.error('插件信息解析失败，请检查插件包格式')
+  } finally {
+    previewLoading.value = false
   }
+}
+
+function cancelPreview() {
+  confirmVisible.value = false
+  selectedPackage.value = null
+  previewInfo.value = null
+}
+
+async function confirmInstall() {
+  if (!selectedPackage.value) return
 
   installing.value = true
   try {
-    const resp = await api.installUnifiedPlugin(uploadFile.raw, installTargetMode.value, nodeIds)
+    const resp = await api.installUnifiedPlugin(selectedPackage.value)
     const data = resp.data || {}
 
     if (Array.isArray(data.warnings) && data.warnings.length) {
@@ -432,6 +495,9 @@ async function handleUnifiedInstall(uploadFile: UploadFile) {
       ElMessage.warning(`插件 ${data.name || ''} 已处理，但存在部分失败，请查看日志`)
     }
 
+    confirmVisible.value = false
+    selectedPackage.value = null
+    previewInfo.value = null
     await refreshAll()
   } catch {
     ElMessage.error('统一安装失败')
@@ -497,10 +563,6 @@ onMounted(refreshAll)
   margin-bottom: 14px;
 }
 
-.install-card {
-  margin-bottom: 14px;
-}
-
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -516,24 +578,6 @@ onMounted(refreshAll)
 .install-tip {
   margin: 0 0 12px;
   color: #6e5d3f;
-}
-
-.install-options {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.option-label {
-  color: #6f5d41;
-  font-size: 13px;
-}
-
-.client-select {
-  width: 100%;
-  margin-bottom: 12px;
 }
 
 .remote-cell {

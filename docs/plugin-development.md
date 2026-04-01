@@ -289,17 +289,21 @@ tar czf my-plugin-1.0.0.tar.gz \
 
 ### 安装
 
-通过 OrangeTea 的「统一插件管理台」上传安装，或通过 API：
+通过 OrangeTea 的「统一插件管理台」上传后会先预览插件信息（名称/版本/依赖/能力），用户确认后再执行安装。
+
+也可通过 API：
+
+```bash
+curl -X POST http://localhost:9528/api/plugins/inspect \
+  -F "plugin=@my-plugin-1.0.0.tar.gz"
+```
+
+确认后安装：
 
 ```bash
 curl -X POST http://localhost:9528/api/plugins/install-unified \
-  -F "plugin=@my-plugin-1.0.0.tar.gz" \
-  -F "target_clients=all"
+  -F "plugin=@my-plugin-1.0.0.tar.gz"
 ```
-
-可选参数：
-- `target_clients=all|selected|none`
-- `node_ids=node-a,node-b`（当 `target_clients=selected` 时生效）
 
 ## 安全建议
 

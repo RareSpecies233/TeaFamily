@@ -41,17 +41,17 @@ export const installPlugin = (file: File, name?: string) => {
   })
 }
 
-export const installUnifiedPlugin = (
-  file: File,
-  targetClients: 'all' | 'selected' | 'none' = 'all',
-  nodeIds: string[] = []
-) => {
+export const inspectUnifiedPlugin = (file: File) => {
   const fd = new FormData()
   fd.append('plugin', file)
-  fd.append('target_clients', targetClients)
-  if (nodeIds.length) {
-    fd.append('node_ids', nodeIds.join(','))
-  }
+  return client().post('/api/plugins/inspect', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+export const installUnifiedPlugin = (file: File) => {
+  const fd = new FormData()
+  fd.append('plugin', file)
   return client().post('/api/plugins/install-unified', fd, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
