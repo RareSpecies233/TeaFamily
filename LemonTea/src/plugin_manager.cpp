@@ -38,10 +38,31 @@ void PluginManager::loadManifest(const std::string& dir) {
         auto manifest = tea::PluginManifest::fromJson(j);
         if (manifest.name.empty()) return;
 
-        std::string binary = dir + "/" + manifest.binary;
+        // LemonTea runs server-side plugin binaries.
+        std::string role = j.value("role", std::string("both"));
+        bool run_on_lemon = (role != "client");
+
+        std::string binary_rel = manifest.binary;
+        if (binary_rel.empty()) {
+            binary_rel = j.value("server_binary", std::string(""));
+        }
+
+        std::string binary;
+        if (!binary_rel.empty()) {
+            binary = dir + "/" + binary_rel;
+            if (!fs::exists(binary)) {
+                binary = dir + "/" + fs::path(binary_rel).filename().string();
+            }
+        }
+
         manifests_[manifest.name] = manifest;
 
-        if (!process_mgr_.hasProcess(manifest.name)) {
+        if (run_on_lemon && !process_mgr_.hasProcess(manifest.name)) {
+            if (binary.empty() || !fs::exists(binary)) {
+                spdlog::warn("Server plugin binary not found for {}: {}", manifest.name,
+                            binary_rel.empty() ? std::string("<empty>") : binary_rel);
+                return;
+            }
             process_mgr_.registerProcess(manifest.name, binary, {}, dir);
         }
         spdlog::info("Plugin loaded: {} v{}", manifest.name, manifest.version);

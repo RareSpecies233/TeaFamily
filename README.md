@@ -97,6 +97,42 @@ mkdir -p logs
 tail -f logs/lemontea.log
 ```
 
+### 配置文件位置与运行（重要）
+
+构建脚本会将组件配置文件复制到 `dist/config/` 下，文件名为组件目录名，例如：
+
+- `dist/config/LemonTea.json`
+- `dist/config/HoneyTea.json`
+- `dist/config/GreenTea.json`
+
+默认情况下，各组件二进制会尝试打开进程启动时工作目录下的 `config.json`（即默认路径为 `config.json`）。因此运行时请显式指定配置文件路径或使用相对路径指向 `dist/config` 中的文件：
+
+推荐在 `dist` 根目录运行并传入 `--config` 参数：
+
+```bash
+cd /opt/teafamily
+./bin/LemonTea --config config/LemonTea.json > logs/lemontea.log 2>&1 &
+./bin/GreenTea --config config/GreenTea.json > logs/greentea.log 2>&1 &
+./bin/HoneyTea --config config/HoneyTea.json > logs/honeytea.log 2>&1 &
+```
+
+如果你必须从 `dist/bin` 目录直接运行，可使用相对路径：
+
+```bash
+cd /opt/teafamily/bin
+./LemonTea --config ../config/LemonTea.json > ../logs/lemontea.log 2>&1 &
+```
+
+也可以使用符号链接或复制单个 `config.json` 到当前工作目录，但要注意不要覆盖不同组件的配置文件：
+
+```bash
+ln -s /opt/teafamily/config/LemonTea.json /opt/teafamily/config.json
+# 或者（谨慎）
+cp /opt/teafamily/config/LemonTea.json /opt/teafamily/config.json
+```
+
+当出现 "Cannot open config file: config.json" 或类似错误时，通常意味着当前工作目录下没有 `config.json`，请用上述任一方法确保二进制能找到正确的配置文件。
+
 ### 使用 systemd（Linux）
 创建服务单元（示例 `/etc/systemd/system/lemontea.service`）：
 

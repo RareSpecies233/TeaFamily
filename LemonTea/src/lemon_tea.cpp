@@ -91,8 +91,11 @@ void LemonTea::run() {
 }
 
 void LemonTea::shutdown() {
+    if (!running_.exchange(false)) {
+        return;
+    }
+
     spdlog::info("LemonTea shutting down...");
-    running_.store(false);
 
     if (heartbeat_thread_.joinable()) heartbeat_thread_.join();
 

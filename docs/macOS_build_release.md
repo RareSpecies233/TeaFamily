@@ -50,6 +50,7 @@
    - 复制插件清单 `plugins/*/plugin.json` 到 `dist/plugins/<plugin>/`。
    - 复制插件前端（若存在 `plugins/<plugin>/frontend`）到 `dist/plugins/<plugin>/frontend/`。
    - 复制各组件的 `config.json` 到 `dist/config/`（文件名按组件命名）。
+  - 自动改写 `dist/config/GreenTea.json` 中被监控进程路径，确保默认指向 `dist/bin/LemonTea`、`dist/bin/HoneyTea` 和 `dist/config/*.json`，避免发布目录下路径不匹配。
 
   如果以上常规模式无法找到产物，脚本会执行回退查找（使用 `find`），在 `build-release` 下查找匹配的可执行文件并复制到相应位置。这样可覆盖不同 CMake 输出布局导致的路径差异。
 

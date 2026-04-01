@@ -52,61 +52,84 @@ fi
 
 # Main executables
 for bin in GreenTea HoneyTea LemonTea; do
-    if [[ -f "$BUILD_DIR/$bin/$bin" ]]; then
-        cp "$BUILD_DIR/$bin/$bin" "$INSTALL_DIR/bin/"
-        echo "  -> $bin"
-    elif [[ -f "$BUILD_DIR/$bin/tea-$(echo "$bin" | tr '[:upper:]' '[:lower:]')" ]]; then
-        cp "$BUILD_DIR/$bin/tea-$(echo "$bin" | tr '[:upper:]' '[:lower:]')" "$INSTALL_DIR/bin/"
-        echo "  -> $bin"
-    fi
-done
+    lower=$(echo "$bin" | tr '[:upper:]' '[:lower:]')
+    src=""
 
-# Fallback: if the expected executables were not copied by the above rules or by
-# `cmake --install`, try to locate them anywhere under the build directory and
-# copy the first match. This handles different CMake configurations/output paths.
-for bin in GreenTea HoneyTea LemonTea; do
-    if [[ ! -f "$INSTALL_DIR/bin/$bin" && ! -f "$INSTALL_DIR/bin/tea-$(echo "$bin" | tr '[:upper:]' '[:lower:]')" ]]; then
-        found=$(find "$BUILD_DIR" -type f -name "$bin" -perm -111 -print -quit 2>/dev/null || true)
-        if [[ -n "$found" ]]; then
-            cp "$found" "$INSTALL_DIR/bin/"
-            echo "  -> found and copied $bin from $found"
-            continue
-        fi
-        found2=$(find "$BUILD_DIR" -type f -name "tea-$(echo "$bin" | tr '[:upper:]' '[:lower:]')" -perm -111 -print -quit 2>/dev/null || true)
-        if [[ -n "$found2" ]]; then
-            cp "$found2" "$INSTALL_DIR/bin/"
-            echo "  -> found and copied $(basename "$found2") from $found2"
-        fi
+    # Preferred modern output location
+    if [[ -f "$BUILD_DIR/bin/$bin" ]]; then
+        src="$BUILD_DIR/bin/$bin"
+    elif [[ -f "$BUILD_DIR/$bin/$bin" ]]; then
+        src="$BUILD_DIR/$bin/$bin"
+    elif [[ -f "$BUILD_DIR/$bin/tea-$lower" ]]; then
+        src="$BUILD_DIR/$bin/tea-$lower"
+    else
+        src=$(find "$BUILD_DIR" -type f \( -name "$bin" -o -name "tea-$lower" \) -perm -111 -print -quit 2>/dev/null || true)
+    fi
+
+    if [[ -n "$src" && -f "$src" ]]; then
+        cp "$src" "$INSTALL_DIR/bin/$bin"
+        chmod +x "$INSTALL_DIR/bin/$bin" || true
+        echo "  -> $bin"
+    else
+        echo "  [WARN] main executable not found: $bin"
     fi
 done
 
 # Plugin executables
-# Copy plugin executables from expected build plugins directory
-for plugin_dir in "$BUILD_DIR"/plugins/*/; do
-    if [[ -d "$plugin_dir" ]]; then
-        plugin_name=$(basename "$plugin_dir")
-        for exe in "$plugin_dir"*; do
-            if [[ -x "$exe" && -f "$exe" ]]; then
-                mkdir -p "$INSTALL_DIR/plugins/$plugin_name"
-                cp "$exe" "$INSTALL_DIR/plugins/$plugin_name/"
-                echo "  -> plugin: $plugin_name/$(basename "$exe")"
-            fi
-        done
-    fi
-done
-
-# Fallback: attempt to find plugin executables anywhere under the build tree
+# Prefer manifest-declared paths (binary/server_binary/client_binary). This keeps
+# runtime layout consistent with plugin.json and avoids manual copies.
+echo "[3.2/4] Collecting plugin executables from manifests..."
 for plugin_manifest in "$PROJECT_ROOT"/plugins/*/plugin.json; do
+    [[ -f "$plugin_manifest" ]] || continue
     plugin_name=$(basename "$(dirname "$plugin_manifest")")
-    if [[ -d "$INSTALL_DIR/plugins/$plugin_name" ]]; then
-        continue
-    fi
-    # look for executables matching plugin name or 'tea-plugin-*'
-    found=$(find "$BUILD_DIR" -type f \( -name "$plugin_name" -o -name "tea-plugin-$plugin_name" -o -name "tea-plugin-*" \) -perm -111 -print -quit 2>/dev/null || true)
-    if [[ -n "$found" ]]; then
-        mkdir -p "$INSTALL_DIR/plugins/$plugin_name"
-        cp "$found" "$INSTALL_DIR/plugins/$plugin_name/"
-        echo "  -> plugin fallback: $plugin_name/$(basename "$found")"
+    mkdir -p "$INSTALL_DIR/plugins/$plugin_name"
+
+    if command -v python3 >/dev/null 2>&1; then
+        while IFS= read -r rel_bin; do
+            [[ -n "$rel_bin" ]] || continue
+            dest="$INSTALL_DIR/plugins/$plugin_name/$rel_bin"
+            mkdir -p "$(dirname "$dest")"
+
+            src_name=$(basename "$rel_bin")
+            src=""
+
+            # Common output location for plugin targets
+            if [[ -f "$BUILD_DIR/bin/$src_name" ]]; then
+                src="$BUILD_DIR/bin/$src_name"
+            elif [[ -f "$BUILD_DIR/$src_name" ]]; then
+                src="$BUILD_DIR/$src_name"
+            else
+                # Fallback: search entire build tree
+                src=$(find "$BUILD_DIR" -type f -name "$src_name" -perm -111 -print -quit 2>/dev/null || true)
+            fi
+
+            if [[ -n "$src" && -f "$src" ]]; then
+                cp "$src" "$dest"
+                chmod +x "$dest" || true
+                echo "  -> plugin: $plugin_name/$rel_bin"
+            else
+                echo "  [WARN] plugin executable not found for $plugin_name: $rel_bin"
+            fi
+        done < <(python3 - "$plugin_manifest" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as f:
+    j = json.load(f)
+
+vals = []
+for key in ("binary", "server_binary", "client_binary"):
+    v = j.get(key)
+    if isinstance(v, str) and v:
+        vals.append(v)
+
+for v in vals:
+    print(v)
+PY
+)
+    else
+        echo "  [WARN] python3 not found; plugin manifest-based executable copy skipped for $plugin_name"
     fi
 done
 
@@ -118,6 +141,33 @@ for cfg in GreenTea/config.json HoneyTea/config.json LemonTea/config.json; do
         cp "$PROJECT_ROOT/$cfg" "$INSTALL_DIR/config/${component}.json"
     fi
 done
+
+# Normalize GreenTea monitored process paths for dist layout.
+if [[ -f "$INSTALL_DIR/config/GreenTea.json" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$INSTALL_DIR/config/GreenTea.json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as f:
+    cfg = json.load(f)
+
+for p in cfg.get('processes', []):
+    name = p.get('name', '')
+    if name == 'LemonTea':
+        p['binary'] = 'bin/LemonTea'
+        p['args'] = ['--config', 'config/LemonTea.json']
+        p['working_dir'] = '.'
+    elif name == 'HoneyTea':
+        p['binary'] = 'bin/HoneyTea'
+        p['args'] = ['--config', 'config/HoneyTea.json']
+        p['working_dir'] = '.'
+
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, ensure_ascii=False, indent=4)
+PY
+    echo "  -> normalized GreenTea.json process paths for dist layout"
+fi
 
 # Plugin manifests
 for manifest in "$PROJECT_ROOT"/plugins/*/plugin.json; do

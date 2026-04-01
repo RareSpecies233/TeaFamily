@@ -86,8 +86,11 @@ void HoneyTea::run() {
 }
 
 void HoneyTea::shutdown() {
+    if (!running_.exchange(false)) {
+        return;
+    }
+
     spdlog::info("HoneyTea shutting down...");
-    running_.store(false);
 
     if (heartbeat_thread_.joinable()) heartbeat_thread_.join();
     if (reconnect_thread_.joinable()) reconnect_thread_.join();

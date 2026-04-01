@@ -42,16 +42,36 @@ void PluginManager::loadManifest(const std::string& dir) {
             return;
         }
 
-        // Resolve binary path
-        std::string binary = dir + "/" + manifest.binary;
-        if (!fs::exists(binary)) {
-            spdlog::warn("Plugin binary not found: {}", binary);
+        // HoneyTea runs client-side plugin binaries.
+        std::string role = j.value("role", std::string("both"));
+        bool run_on_honey = (role != "server");
+
+        std::string binary_rel = manifest.binary;
+        if (binary_rel.empty()) {
+            binary_rel = j.value("client_binary", std::string(""));
+        }
+
+        std::string binary;
+        if (!binary_rel.empty()) {
+            // Prefer declared relative path under plugin dir.
+            binary = dir + "/" + binary_rel;
+
+            // Compatibility: if build script places executable at plugin root,
+            // fallback to dir/<basename(binary_rel)>.
+            if (!fs::exists(binary)) {
+                binary = dir + "/" + fs::path(binary_rel).filename().string();
+            }
         }
 
         manifests_[manifest.name] = manifest;
 
         // Register with process manager
-        if (!process_mgr_.hasProcess(manifest.name)) {
+        if (run_on_honey && !process_mgr_.hasProcess(manifest.name)) {
+            if (binary.empty() || !fs::exists(binary)) {
+                spdlog::warn("Client plugin binary not found for {}: {}", manifest.name,
+                            binary_rel.empty() ? std::string("<empty>") : binary_rel);
+                return;
+            }
             process_mgr_.registerProcess(manifest.name, binary, {}, dir);
         }
 
