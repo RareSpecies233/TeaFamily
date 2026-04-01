@@ -42,16 +42,54 @@
     </el-menu>
 
     <div class="sidebar-footer">
-      <el-button text type="danger" @click="handleDisconnect">
-        <el-icon><SwitchButton /></el-icon>
-        断开连接
-      </el-button>
+      <div class="connection-card" @click="openConfig">
+        <div class="connection-top">
+          <span class="connection-label">LemonTea 连接</span>
+          <el-tag :type="statusType" size="small">{{ statusLabel }}</el-tag>
+        </div>
+        <p class="server-url">{{ displayServerUrl }}</p>
+        <p v-if="connectionStore.error" class="connection-error">{{ connectionStore.error }}</p>
+      </div>
+
+      <div class="connection-actions">
+        <el-button text type="primary" :loading="connectionStore.connecting" @click="quickConnect">
+          {{ connectionStore.connected ? '重新连接' : '立即连接' }}
+        </el-button>
+        <el-button v-if="connectionStore.connected" text type="danger" @click="handleDisconnect">
+          断开连接
+        </el-button>
+      </div>
     </div>
+
+    <el-dialog v-model="configVisible" title="LemonTea 连接配置" width="460px">
+      <el-form label-position="top">
+        <el-form-item label="服务器地址">
+          <el-input
+            v-model="serverAddress"
+            placeholder="例如：127.0.0.1:9528"
+            :disabled="connectionStore.connecting"
+          />
+        </el-form-item>
+        <el-alert
+          v-if="connectionStore.error"
+          :title="connectionStore.error"
+          type="error"
+          :closable="false"
+        />
+      </el-form>
+
+      <template #footer>
+        <el-button @click="configVisible = false">取消</el-button>
+        <el-button type="primary" :loading="connectionStore.connecting" @click="saveAndConnect">
+          保存并连接
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useConnectionStore } from '@/stores/connection'
 import { usePluginStore } from '@/stores/plugins'
@@ -59,13 +97,49 @@ import { usePluginStore } from '@/stores/plugins'
 const route = useRoute()
 const connectionStore = useConnectionStore()
 const pluginStore = usePluginStore()
+const configVisible = ref(false)
+const serverAddress = ref(connectionStore.serverUrl || 'http://127.0.0.1:9528')
+
+const statusType = computed(() => (connectionStore.connected ? 'success' : 'info'))
+const statusLabel = computed(() => (connectionStore.connected ? '在线' : '离线'))
+const displayServerUrl = computed(() => connectionStore.serverUrl || '未设置服务器地址')
 
 onMounted(() => {
-  pluginStore.fetchFrontendPlugins()
+  if (connectionStore.connected) {
+    pluginStore.fetchFrontendPlugins()
+  }
 })
+
+watch(
+  () => connectionStore.serverUrl,
+  (value) => {
+    if (!configVisible.value) {
+      serverAddress.value = value || 'http://127.0.0.1:9528'
+    }
+  }
+)
 
 function handleDisconnect() {
   connectionStore.disconnect()
+}
+
+function openConfig() {
+  serverAddress.value = connectionStore.serverUrl || serverAddress.value
+  configVisible.value = true
+}
+
+async function quickConnect() {
+  const ok = await connectionStore.connect(serverAddress.value)
+  if (ok) {
+    await pluginStore.fetchFrontendPlugins()
+  }
+}
+
+async function saveAndConnect() {
+  const ok = await connectionStore.connect(serverAddress.value)
+  if (!ok) return
+  await pluginStore.fetchFrontendPlugins()
+  configVisible.value = false
 }
 </script>
 
@@ -140,6 +214,44 @@ function handleDisconnect() {
 .sidebar-footer {
   padding: 12px;
   border-top: 1px solid #e6d7c0;
-  text-align: center;
+}
+
+.connection-card {
+  border: 1px solid #dfcfb3;
+  border-radius: 12px;
+  padding: 10px;
+  cursor: pointer;
+  background: rgba(255, 252, 245, 0.78);
+}
+
+.connection-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.connection-label {
+  font-size: 12px;
+  color: #7a6645;
+}
+
+.server-url {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #4a3a1f;
+  word-break: break-all;
+}
+
+.connection-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #c43b45;
+}
+
+.connection-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
 }
 </style>

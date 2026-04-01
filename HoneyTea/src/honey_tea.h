@@ -4,6 +4,9 @@
 #include <memory>
 #include <atomic>
 #include <thread>
+#include <map>
+#include <mutex>
+#include <vector>
 #include <tea/common.h>
 #include <tea/config.h>
 #include <tea/tcp_connection.h>
@@ -28,6 +31,13 @@ public:
     bool requestSelfUpdate(const std::string& new_binary_path);
 
 private:
+    struct IncomingTransfer {
+        std::string plugin_name;
+        size_t total_size = 0;
+        size_t received_size = 0;
+        std::vector<uint8_t> data;
+    };
+
     void connectToServer();
     void onMessage(tea::TcpConnection::Ptr conn, const tea::Message& msg);
     void onDisconnect(tea::TcpConnection::Ptr conn);
@@ -60,4 +70,9 @@ private:
     int heartbeat_interval_;
     int reconnect_interval_;
     std::atomic<bool> connected_{false};
+
+    // Remote plugin install transfer states.
+    std::mutex transfer_mutex_;
+    std::map<std::string, IncomingTransfer> incoming_transfers_;
+    std::string pending_install_name_;
 };

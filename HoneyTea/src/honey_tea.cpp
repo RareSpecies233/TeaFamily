@@ -1,5 +1,7 @@
 #include "honey_tea.h"
 #include <spdlog/spdlog.h>
+#include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <filesystem>
 #include <sys/socket.h>
@@ -8,6 +10,50 @@
 #include <unistd.h>
 
 namespace fs = std::filesystem;
+
+namespace {
+
+uint8_t fromHex(char c) {
+    if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
+    if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(10 + c - 'a');
+    if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(10 + c - 'A');
+    return 0;
+}
+
+std::vector<uint8_t> decodeHex(const std::string& hex) {
+    if (hex.size() % 2 != 0) {
+        return {};
+    }
+    std::vector<uint8_t> out;
+    out.reserve(hex.size() / 2);
+    for (size_t i = 0; i < hex.size(); i += 2) {
+        uint8_t hi = fromHex(hex[i]);
+        uint8_t lo = fromHex(hex[i + 1]);
+        out.push_back(static_cast<uint8_t>((hi << 4) | lo));
+    }
+    return out;
+}
+
+std::string inferPluginNameFromArchive(const std::string& filename) {
+    if (filename.empty()) {
+        return {};
+    }
+    std::string name = filename;
+    constexpr const char* TAR_GZ = ".tar.gz";
+    constexpr const char* TGZ = ".tgz";
+    if (name.size() > std::strlen(TAR_GZ) &&
+        name.compare(name.size() - std::strlen(TAR_GZ), std::strlen(TAR_GZ), TAR_GZ) == 0) {
+        name.resize(name.size() - std::strlen(TAR_GZ));
+    } else if (name.size() > std::strlen(TGZ) &&
+               name.compare(name.size() - std::strlen(TGZ), std::strlen(TGZ), TGZ) == 0) {
+        name.resize(name.size() - std::strlen(TGZ));
+    } else {
+        name = fs::path(name).stem().string();
+    }
+    return name;
+}
+
+}  // namespace
 
 HoneyTea::HoneyTea() {}
 
@@ -195,6 +241,10 @@ void HoneyTea::onMessage(tea::TcpConnection::Ptr conn, const tea::Message& msg) 
             std::string name = msg.payload.value("name", "");
             // This triggers a file transfer flow
             spdlog::info("Plugin install request received: {}", name);
+            {
+                std::lock_guard<std::mutex> lock(transfer_mutex_);
+                pending_install_name_ = name;
+            }
             conn->send({tea::MsgType::PLUGIN_INSTALL_ACK,
                        {{"name", name}, {"ready", true}}});
             break;
@@ -208,21 +258,107 @@ void HoneyTea::onMessage(tea::TcpConnection::Ptr conn, const tea::Message& msg) 
         }
 
         case tea::MsgType::FILE_TRANSFER_BEGIN: {
-            spdlog::info("File transfer starting: {}", msg.payload.dump());
+            const std::string transfer_id = msg.payload.value("transfer_id", std::string(""));
+            const std::string filename = msg.payload.value("filename", std::string(""));
+            const size_t total_size = msg.payload.value("total_size", static_cast<size_t>(0));
+
+            if (transfer_id.empty()) {
+                spdlog::error("FILE_TRANSFER_BEGIN missing transfer_id");
+                conn->send(tea::Message::makeError("missing transfer_id"));
+                break;
+            }
+
+            IncomingTransfer transfer;
+            {
+                std::lock_guard<std::mutex> lock(transfer_mutex_);
+                transfer.plugin_name = pending_install_name_;
+                if (transfer.plugin_name.empty()) {
+                    transfer.plugin_name = inferPluginNameFromArchive(filename);
+                }
+            }
+            transfer.total_size = total_size;
+            if (total_size > 0) {
+                transfer.data.reserve(total_size);
+            }
+            const std::string plugin_name_for_log = transfer.plugin_name;
+
+            {
+                std::lock_guard<std::mutex> lock(transfer_mutex_);
+                incoming_transfers_[transfer_id] = std::move(transfer);
+            }
+
+            spdlog::info("File transfer starting: transfer_id={}, plugin={}, filename={}, total_size={}",
+                         transfer_id, plugin_name_for_log, filename, total_size);
             conn->send({tea::MsgType::FILE_TRANSFER_ACK,
-                       {{"transfer_id", msg.payload.value("transfer_id", "")}}});
+                       {{"transfer_id", transfer_id}}});
             break;
         }
 
         case tea::MsgType::FILE_TRANSFER_DATA: {
-            // Handle incoming file data for plugin install
-            // Data is hex-encoded in payload
+            const std::string transfer_id = msg.payload.value("transfer_id", std::string(""));
+            const size_t offset = msg.payload.value("offset", static_cast<size_t>(0));
+            const std::string hex_data = msg.payload.value("data", std::string(""));
+
+            auto chunk = decodeHex(hex_data);
+            if (chunk.empty() && !hex_data.empty()) {
+                spdlog::warn("Received invalid hex payload for transfer {}", transfer_id);
+                break;
+            }
+
+            std::lock_guard<std::mutex> lock(transfer_mutex_);
+            auto it = incoming_transfers_.find(transfer_id);
+            if (it == incoming_transfers_.end()) {
+                spdlog::warn("FILE_TRANSFER_DATA for unknown transfer_id={}", transfer_id);
+                break;
+            }
+
+            auto& transfer = it->second;
+            const size_t required = offset + chunk.size();
+            if (transfer.data.size() < required) {
+                transfer.data.resize(required);
+            }
+            std::copy(chunk.begin(), chunk.end(), transfer.data.begin() + static_cast<std::ptrdiff_t>(offset));
+            transfer.received_size = std::max(transfer.received_size, required);
             break;
         }
 
         case tea::MsgType::FILE_TRANSFER_END: {
             std::string transfer_id = msg.payload.value("transfer_id", "");
-            spdlog::info("File transfer completed: {}", transfer_id);
+
+            IncomingTransfer transfer;
+            {
+                std::lock_guard<std::mutex> lock(transfer_mutex_);
+                auto it = incoming_transfers_.find(transfer_id);
+                if (it == incoming_transfers_.end()) {
+                    spdlog::warn("FILE_TRANSFER_END for unknown transfer_id={}", transfer_id);
+                    break;
+                }
+                transfer = std::move(it->second);
+                incoming_transfers_.erase(it);
+                pending_install_name_.clear();
+            }
+
+            if (transfer.plugin_name.empty()) {
+                spdlog::error("Cannot install plugin: transfer {} has empty plugin_name", transfer_id);
+                conn->send({tea::MsgType::PLUGIN_INSTALL_ACK,
+                           {{"name", ""}, {"success", false}, {"error", "missing plugin name"}}});
+                break;
+            }
+
+            if (transfer.received_size < transfer.total_size) {
+                spdlog::warn("Transfer {} incomplete: received={} expected={}",
+                             transfer_id, transfer.received_size, transfer.total_size);
+            }
+
+            if (transfer.received_size < transfer.data.size()) {
+                transfer.data.resize(transfer.received_size);
+            }
+
+            const bool ok = plugin_mgr_->installPlugin(transfer.plugin_name, transfer.data);
+            spdlog::info("File transfer completed: transfer_id={}, plugin={}, install={}",
+                         transfer_id, transfer.plugin_name, ok ? "ok" : "failed");
+            conn->send({tea::MsgType::PLUGIN_INSTALL_ACK,
+                       {{"name", transfer.plugin_name}, {"success", ok}}});
             break;
         }
 

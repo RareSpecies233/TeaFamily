@@ -25,17 +25,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useConnectionStore } from '@/stores/connection'
 import * as api from '@/api'
 import PluginLoader from '@/components/PluginLoader.vue'
 
 const route = useRoute()
 const router = useRouter()
+const connectionStore = useConnectionStore()
 const pluginName = ref(route.params.name as string)
 const pluginUrl = ref('')
 const loading = ref(true)
 const error = ref('')
+
+function buildPluginUrl(name: string, entry: string) {
+  const base = (connectionStore.serverUrl || '').replace(/\/+$/, '')
+  const encodedName = encodeURIComponent(name)
+  const encodedEntry = encodeURI(entry)
+  if (!base) {
+    return `/api/frontend-plugins/${encodedName}/${encodedEntry}`
+  }
+  return `${base}/api/frontend-plugins/${encodedName}/${encodedEntry}`
+}
 
 async function loadPluginFrontend() {
   loading.value = true
@@ -46,7 +58,7 @@ async function loadPluginFrontend() {
     const found = plugins.find((p: any) => p.name === pluginName.value)
     if (found) {
       const entry = found.entry || 'index.js'
-      pluginUrl.value = `/api/frontend-plugins/${pluginName.value}/${entry}`
+      pluginUrl.value = buildPluginUrl(pluginName.value, entry)
     } else {
       error.value = '未找到对应的前端插件'
     }
@@ -56,6 +68,23 @@ async function loadPluginFrontend() {
     loading.value = false
   }
 }
+
+watch(
+  () => route.params.name,
+  (value) => {
+    pluginName.value = value as string
+    loadPluginFrontend()
+  }
+)
+
+watch(
+  () => connectionStore.serverUrl,
+  () => {
+    if (pluginName.value) {
+      loadPluginFrontend()
+    }
+  }
+)
 
 onMounted(loadPluginFrontend)
 </script>

@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, defineAsyncComponent, h, render as vueRender } from 'vue'
+import { ref, onUnmounted, watch, h, render as vueRender } from 'vue'
 
 const props = defineProps<{
   url: string
@@ -25,6 +25,11 @@ let cleanup: (() => void) | null = null
 async function loadPlugin() {
   if (!containerRef.value) return
   loadError.value = ''
+
+  if (cleanup) {
+    cleanup()
+    cleanup = null
+  }
 
   try {
     const module = await import(/* @vite-ignore */ props.url)
@@ -55,7 +60,14 @@ async function loadPlugin() {
   }
 }
 
-onMounted(loadPlugin)
+watch(
+  () => props.url,
+  () => {
+    loadPlugin()
+  },
+  { immediate: true }
+)
+
 onUnmounted(() => {
   if (cleanup) cleanup()
 })

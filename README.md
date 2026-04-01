@@ -74,6 +74,8 @@ macOS 插件导出脚本：
 ./scripts/macOS_export_monitor_plugin.sh
 ```
 
+脚本会导出统一安装包（例如 `ssh-unified-macos.tar.gz`），用于 OrangeTea 的统一插件安装入口。
+
 ## OrangeTea 前端
 
 ```bash

@@ -110,9 +110,8 @@ mkdir -p logs
 ./scripts/macOS_export_monitor_plugin.sh
 ```
 
-每个脚本会生成两类包：
-- 运行时插件包：`<plugin>-runtime-macos.tar.gz`（用于 LemonTea/HoneyTea 安装）
-- 前端插件包：`<plugin>-frontend-macos.tar.gz`（用于 OrangeTea 前端插件安装）
+每个脚本会生成一个统一包：
+- 统一插件包：`<plugin>-unified-macos.tar.gz`（包含运行时与前端，供 OrangeTea 统一安装入口使用）
 
 ## 常见问题与排查
 

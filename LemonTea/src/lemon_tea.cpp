@@ -318,9 +318,10 @@ bool LemonTea::installRemotePlugin(const std::string& node_id, const std::string
     // Send install command
     conn->send({tea::MsgType::PLUGIN_INSTALL, {{"name", name}}});
 
-    // Send file transfer
-    std::string transfer_id = std::to_string(tea::nowMs());
-    conn->send(tea::Message::makeFileTransferBegin(name + ".tar.gz", data.size()));
+    // Send file transfer and keep transfer_id consistent across begin/data/end.
+    auto begin = tea::Message::makeFileTransferBegin(name + ".tar.gz", data.size());
+    std::string transfer_id = begin.payload.value("transfer_id", std::string(""));
+    conn->send(begin);
 
     // Send data in chunks
     constexpr size_t CHUNK_SIZE = 32768;

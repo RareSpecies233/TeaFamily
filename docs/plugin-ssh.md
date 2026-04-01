@@ -2,8 +2,7 @@
 
 ## 插件类型
 - `distributed`（双端插件）
-- 需要在 LemonTea 与 HoneyTea 同时安装运行时插件包
-- 可选安装 OrangeTea 前端插件包用于动态页面
+- 统一包会自动分发到 LemonTea / HoneyTea，并自动安装 OrangeTea 前端页面
 
 ## 导出（macOS）
 ```bash
@@ -11,14 +10,12 @@
 ```
 
 默认输出：
-- `dist/plugin-exports/ssh/ssh-runtime-macos.tar.gz`
-- `dist/plugin-exports/ssh/ssh-frontend-macos.tar.gz`
+- `dist/plugin-exports/ssh/ssh-unified-macos.tar.gz`
 
 ## 安装步骤
-1. 在 OrangeTea 的“插件管理 -> LemonTea 插件”上传 `ssh-runtime-macos.tar.gz`。
-2. 在 OrangeTea 的“插件管理 -> HoneyTea 插件”中，给目标客户端上传同一个 `ssh-runtime-macos.tar.gz`。
-3. 在 OrangeTea 的“插件管理 -> OrangeTea 前端插件”上传 `ssh-frontend-macos.tar.gz`。
-4. 启动 LemonTea 与 HoneyTea 侧的 `ssh` 插件。
+1. 在 OrangeTea 的“统一插件管理台”上传 `ssh-unified-macos.tar.gz`。
+2. 选择 HoneyTea 分发范围（全部在线 / 指定节点 / 不分发）。
+3. 安装完成后，可在同一页统一启动 LemonTea 与 HoneyTea 侧 `ssh` 插件。
 
 ## 运行与控制
 - LemonTea 侧：

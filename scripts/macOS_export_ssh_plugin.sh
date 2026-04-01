@@ -40,22 +40,22 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 runtime_dir="$tmp_dir/runtime"
-frontend_dir="$tmp_dir/frontend"
-mkdir -p "$runtime_dir/server" "$runtime_dir/client" "$frontend_dir"
+package_dir="$tmp_dir/package"
+mkdir -p "$runtime_dir/server" "$runtime_dir/client" "$package_dir/frontend"
 
 cp "$PROJECT_ROOT/plugins/$PLUGIN_NAME/plugin.json" "$runtime_dir/plugin.json"
 cp "$server_bin" "$runtime_dir/server/$SERVER_BIN_NAME"
 cp "$client_bin" "$runtime_dir/client/$CLIENT_BIN_NAME"
 chmod +x "$runtime_dir/server/$SERVER_BIN_NAME" "$runtime_dir/client/$CLIENT_BIN_NAME"
 
-cp -R "$PROJECT_ROOT/plugins/$PLUGIN_NAME/frontend/"* "$frontend_dir/"
+cp -R "$PROJECT_ROOT/plugins/$PLUGIN_NAME/frontend/"* "$package_dir/frontend/"
+cp "$runtime_dir/plugin.json" "$package_dir/plugin.json"
+cp -R "$runtime_dir/server" "$package_dir/"
+cp -R "$runtime_dir/client" "$package_dir/"
 
-runtime_pkg="$OUTPUT_DIR/${PLUGIN_NAME}-runtime-macos.tar.gz"
-frontend_pkg="$OUTPUT_DIR/${PLUGIN_NAME}-frontend-macos.tar.gz"
+unified_pkg="$OUTPUT_DIR/${PLUGIN_NAME}-unified-macos.tar.gz"
 
-tar -czf "$runtime_pkg" -C "$runtime_dir" plugin.json server client
-tar -czf "$frontend_pkg" -C "$frontend_dir" .
+tar -czf "$unified_pkg" -C "$package_dir" plugin.json server client frontend
 
 echo "[OK] 导出完成"
-echo "  runtime : $runtime_pkg"
-echo "  frontend: $frontend_pkg"
+echo "  unified: $unified_pkg"

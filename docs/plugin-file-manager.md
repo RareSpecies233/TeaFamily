@@ -2,8 +2,7 @@
 
 ## 插件类型
 - `distributed`（双端插件）
-- 需要 LemonTea 与 HoneyTea 都安装运行时插件包
-- 可选安装 OrangeTea 前端插件包用于动态页面
+- 统一包会自动分发到 LemonTea / HoneyTea，并自动安装 OrangeTea 前端页面
 
 ## 导出（macOS）
 ```bash
@@ -11,13 +10,12 @@
 ```
 
 默认输出：
-- `dist/plugin-exports/file-manager/file-manager-runtime-macos.tar.gz`
-- `dist/plugin-exports/file-manager/file-manager-frontend-macos.tar.gz`
+- `dist/plugin-exports/file-manager/file-manager-unified-macos.tar.gz`
 
 ## 安装步骤
-1. 在 OrangeTea 的“LemonTea 插件”上传 `file-manager-runtime-macos.tar.gz`。
-2. 在 OrangeTea 的“HoneyTea 插件”给目标客户端上传同一个运行时包。
-3. 在 OrangeTea 的“OrangeTea 前端插件”上传 `file-manager-frontend-macos.tar.gz`。
+1. 在 OrangeTea 的“统一插件管理台”上传 `file-manager-unified-macos.tar.gz`。
+2. 选择 HoneyTea 分发范围（全部在线 / 指定节点 / 不分发）。
+3. 安装完成后，在同一页统一启动或停止服务端与远端插件进程。
 
 ## 运行与控制 API
 - LemonTea 侧：

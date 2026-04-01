@@ -5,9 +5,333 @@
 #include <nlohmann/json.hpp>
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <cstdlib>
+#include <optional>
+#include <sstream>
+#include <vector>
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
+
+namespace {
+
+struct UploadedArchive {
+    fs::path tar_path;
+    fs::path extract_dir;
+    fs::path package_root;
+};
+
+struct FrontendInstallResult {
+    bool success = false;
+    std::string name;
+    std::string error;
+};
+
+struct UnifiedPackageMeta {
+    std::string name;
+    std::string version;
+    std::string plugin_type;
+    bool has_frontend = false;
+};
+
+bool isValidPluginName(const std::string& name) {
+    if (name.empty()) {
+        return false;
+    }
+    for (char c : name) {
+        const auto uc = static_cast<unsigned char>(c);
+        if (!(std::isalnum(uc) || c == '-' || c == '_')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string shellEscape(const std::string& value) {
+    std::string out = "'";
+    for (char c : value) {
+        if (c == '\'') {
+            out += "'\\''";
+        } else {
+            out.push_back(c);
+        }
+    }
+    out += "'";
+    return out;
+}
+
+fs::path makeTempPath(const std::string& prefix, const std::string& suffix) {
+    static std::atomic<uint64_t> seq{0};
+    return fs::temp_directory_path() /
+           (prefix + std::to_string(tea::nowMs()) + "_" + std::to_string(seq.fetch_add(1)) + suffix);
+}
+
+bool writeFile(const fs::path& path, const std::string& content, std::string& error) {
+    try {
+        std::ofstream out(path, std::ios::binary);
+        if (!out.is_open()) {
+            error = "cannot create temp file";
+            return false;
+        }
+        out.write(content.data(), static_cast<std::streamsize>(content.size()));
+        if (!out.good()) {
+            error = "failed writing temp file";
+            return false;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        error = e.what();
+        return false;
+    }
+}
+
+bool extractArchive(const fs::path& archive, const fs::path& dest, std::string& error) {
+    fs::create_directories(dest);
+    const std::string cmd =
+        "tar -xzf " + shellEscape(archive.string()) + " -C " + shellEscape(dest.string());
+    const int ret = std::system(cmd.c_str());
+    if (ret != 0) {
+        error = "failed to extract archive";
+        return false;
+    }
+    return true;
+}
+
+std::optional<json> readJsonFile(const fs::path& path, std::string& error) {
+    try {
+        std::ifstream in(path);
+        if (!in.is_open()) {
+            error = "cannot open json file: " + path.string();
+            return std::nullopt;
+        }
+        return json::parse(in);
+    } catch (const std::exception& e) {
+        error = e.what();
+        return std::nullopt;
+    }
+}
+
+std::optional<fs::path> detectPackageRoot(const fs::path& extract_dir) {
+    if (fs::exists(extract_dir / "plugin.json") || fs::exists(extract_dir / "frontend" / "plugin.json")) {
+        return extract_dir;
+    }
+
+    for (const auto& entry : fs::directory_iterator(extract_dir)) {
+        if (!entry.is_directory()) {
+            continue;
+        }
+        const fs::path candidate = entry.path();
+        if (fs::exists(candidate / "plugin.json") || fs::exists(candidate / "frontend" / "plugin.json")) {
+            return candidate;
+        }
+    }
+
+    return std::nullopt;
+}
+
+bool copyDirectoryContents(const fs::path& from, const fs::path& to, std::string& error) {
+    try {
+        fs::create_directories(to);
+        for (const auto& entry : fs::directory_iterator(from)) {
+            const fs::path dst = to / entry.path().filename();
+            fs::copy(entry.path(), dst,
+                     fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+        }
+        return true;
+    } catch (const std::exception& e) {
+        error = e.what();
+        return false;
+    }
+}
+
+std::optional<UploadedArchive> unpackArchive(const std::string& content,
+                                             const std::string& prefix,
+                                             std::string& error) {
+    UploadedArchive archive;
+    archive.tar_path = makeTempPath(prefix, ".tar.gz");
+    archive.extract_dir = makeTempPath(prefix + "_extract_", "");
+
+    if (!writeFile(archive.tar_path, content, error)) {
+        return std::nullopt;
+    }
+
+    if (!extractArchive(archive.tar_path, archive.extract_dir, error)) {
+        return std::nullopt;
+    }
+
+    auto root = detectPackageRoot(archive.extract_dir);
+    if (!root) {
+        error = "plugin.json not found in archive";
+        return std::nullopt;
+    }
+
+    archive.package_root = *root;
+    return archive;
+}
+
+void cleanupArchive(const UploadedArchive& archive) {
+    std::error_code ec;
+    if (!archive.tar_path.empty()) {
+        fs::remove(archive.tar_path, ec);
+    }
+    if (!archive.extract_dir.empty()) {
+        fs::remove_all(archive.extract_dir, ec);
+    }
+}
+
+std::string inferRuntimePluginName(const UploadedArchive& archive, const std::string& fallback) {
+    std::string error;
+    auto root_manifest = readJsonFile(archive.package_root / "plugin.json", error);
+    if (root_manifest) {
+        const std::string name = root_manifest->value("name", std::string(""));
+        if (isValidPluginName(name)) {
+            return name;
+        }
+    }
+    std::string stem = fs::path(fallback).stem().string();
+    if (isValidPluginName(stem)) {
+        return stem;
+    }
+    return {};
+}
+
+FrontendInstallResult installFrontendFromArchive(const UploadedArchive& archive,
+                                                 const std::string& frontend_plugins_dir,
+                                                 const std::string& fallback_name = "") {
+    FrontendInstallResult result;
+
+    fs::path source_dir;
+    fs::path manifest_path;
+
+    if (fs::exists(archive.package_root / "frontend" / "plugin.json")) {
+        source_dir = archive.package_root / "frontend";
+        manifest_path = source_dir / "plugin.json";
+    } else if (fs::exists(archive.package_root / "plugin.json")) {
+        source_dir = archive.package_root;
+        manifest_path = source_dir / "plugin.json";
+    } else {
+        result.error = "frontend manifest not found";
+        return result;
+    }
+
+    std::string error;
+    auto manifest = readJsonFile(manifest_path, error);
+    if (!manifest) {
+        result.error = "invalid frontend manifest: " + error;
+        return result;
+    }
+
+    if (source_dir == archive.package_root && !manifest->contains("entry")) {
+        result.error = "archive does not contain frontend plugin manifest";
+        return result;
+    }
+
+    std::string plugin_name = manifest->value("name", fallback_name);
+    if (!isValidPluginName(plugin_name)) {
+        result.error = "invalid plugin name in frontend manifest";
+        return result;
+    }
+
+    (*manifest)["name"] = plugin_name;
+
+    try {
+        std::ofstream out(manifest_path);
+        out << manifest->dump(2);
+    } catch (const std::exception& e) {
+        result.error = e.what();
+        return result;
+    }
+
+    const fs::path dest_dir = fs::path(frontend_plugins_dir) / plugin_name;
+    std::error_code ec;
+    fs::remove_all(dest_dir, ec);
+    fs::create_directories(dest_dir, ec);
+
+    if (!copyDirectoryContents(source_dir, dest_dir, error)) {
+        result.error = "failed to copy frontend files: " + error;
+        return result;
+    }
+
+    result.success = true;
+    result.name = plugin_name;
+    return result;
+}
+
+bool parseUnifiedMeta(const UploadedArchive& archive, UnifiedPackageMeta& meta, std::string& error) {
+    auto root_manifest = readJsonFile(archive.package_root / "plugin.json", error);
+    if (!root_manifest) {
+        return false;
+    }
+
+    meta.name = root_manifest->value("name", std::string(""));
+    meta.version = root_manifest->value("version", std::string(""));
+    meta.plugin_type = root_manifest->value("plugin_type", std::string("distributed"));
+    meta.has_frontend = root_manifest->value("has_frontend", false) ||
+                        fs::exists(archive.package_root / "frontend");
+
+    if (!isValidPluginName(meta.name)) {
+        error = "invalid plugin name in plugin.json";
+        return false;
+    }
+
+    if (meta.plugin_type != "distributed" && meta.plugin_type != "lemon-only" &&
+        meta.plugin_type != "honey-only") {
+        meta.plugin_type = "distributed";
+    }
+
+    return true;
+}
+
+std::vector<std::string> splitCsv(const std::string& value) {
+    std::vector<std::string> out;
+    std::stringstream ss(value);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        token.erase(token.begin(), std::find_if(token.begin(), token.end(), [](unsigned char c) {
+            return !std::isspace(c);
+        }));
+        token.erase(std::find_if(token.rbegin(), token.rend(), [](unsigned char c) {
+            return !std::isspace(c);
+        }).base(), token.end());
+        if (!token.empty()) {
+            out.push_back(token);
+        }
+    }
+    return out;
+}
+
+std::vector<std::string> resolveRemoteTargets(const LemonTea& lemon,
+                                              const std::string& target_mode,
+                                              const std::string& node_ids_csv) {
+    std::vector<std::string> connected_nodes;
+    for (const auto& client : lemon.getClients()) {
+        if (client.connected) {
+            connected_nodes.push_back(client.node_id);
+        }
+    }
+
+    if (target_mode == "none") {
+        return {};
+    }
+
+    if (!node_ids_csv.empty()) {
+        auto requested = splitCsv(node_ids_csv);
+        std::vector<std::string> selected;
+        for (const auto& node_id : requested) {
+            if (std::find(connected_nodes.begin(), connected_nodes.end(), node_id) != connected_nodes.end()) {
+                selected.push_back(node_id);
+            }
+        }
+        return selected;
+    }
+
+    return connected_nodes;
+}
+
+}  // namespace
 
 struct HttpApi::Impl {
     httplib::Server svr;
@@ -134,15 +458,111 @@ void HttpApi::setupRoutes() {
             res.set_content(R"({"error":"missing plugin file"})", "application/json");
             return;
         }
+
         auto file = req.get_file_value("plugin");
-        std::string name = req.get_param_value("name");
+        std::string name = req.has_param("name") ? req.get_param_value("name") : "";
+
+        std::string parse_error;
+        auto archive = unpackArchive(file.content, "tea_local_plugin_", parse_error);
+        if (!archive) {
+            res.status = 400;
+            res.set_content(json{{"error", parse_error}}.dump(), "application/json");
+            return;
+        }
+
         if (name.empty()) {
-            name = fs::path(file.filename).stem().string();
+            name = inferRuntimePluginName(*archive, file.filename);
+        }
+        cleanupArchive(*archive);
+
+        if (!isValidPluginName(name)) {
+            res.status = 400;
+            res.set_content(json{{"error", "invalid plugin name"}}.dump(), "application/json");
+            return;
         }
 
         std::vector<uint8_t> data(file.content.begin(), file.content.end());
         bool ok = lemon_.installPlugin(name, data);
         res.set_content(json{{"success", ok}, {"name", name}}.dump(), "application/json");
+    });
+
+    svr.Post("/api/plugins/install-unified", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!req.has_file("plugin")) {
+            res.status = 400;
+            res.set_content(R"({"error":"missing plugin file"})", "application/json");
+            return;
+        }
+
+        auto file = req.get_file_value("plugin");
+        std::string parse_error;
+        auto archive = unpackArchive(file.content, "tea_unified_plugin_", parse_error);
+        if (!archive) {
+            res.status = 400;
+            res.set_content(json{{"error", parse_error}}.dump(), "application/json");
+            return;
+        }
+
+        UnifiedPackageMeta meta;
+        if (!parseUnifiedMeta(*archive, meta, parse_error)) {
+            cleanupArchive(*archive);
+            res.status = 400;
+            res.set_content(json{{"error", parse_error}}.dump(), "application/json");
+            return;
+        }
+
+        std::vector<uint8_t> runtime_data(file.content.begin(), file.content.end());
+
+        bool local_ok = true;
+        if (meta.plugin_type != "honey-only") {
+            local_ok = lemon_.installPlugin(meta.name, runtime_data);
+        }
+
+        bool frontend_ok = true;
+        std::string frontend_name;
+        if (meta.has_frontend) {
+            auto frontend = installFrontendFromArchive(*archive, lemon_.frontendPluginsDir(), meta.name);
+            frontend_ok = frontend.success;
+            frontend_name = frontend.name;
+            if (!frontend_ok) {
+                spdlog::warn("Unified frontend install failed for {}: {}", meta.name, frontend.error);
+            }
+        }
+
+        std::string target_mode = req.has_param("target_clients")
+            ? req.get_param_value("target_clients")
+            : "all";
+        std::string node_ids = req.has_param("node_ids") ? req.get_param_value("node_ids") : "";
+
+        std::vector<json> remote_results;
+        bool remote_ok = true;
+        std::vector<std::string> warnings;
+
+        if (meta.plugin_type != "lemon-only") {
+            auto targets = resolveRemoteTargets(lemon_, target_mode, node_ids);
+            if (targets.empty()) {
+                warnings.push_back("no online HoneyTea clients selected");
+            }
+            for (const auto& node_id : targets) {
+                bool ok = lemon_.installRemotePlugin(node_id, meta.name, runtime_data);
+                remote_results.push_back({{"node_id", node_id}, {"success", ok}});
+                remote_ok = remote_ok && ok;
+            }
+        }
+
+        cleanupArchive(*archive);
+
+        const bool overall_ok = local_ok && frontend_ok && remote_ok;
+        res.set_content(json{
+            {"success", overall_ok},
+            {"name", meta.name},
+            {"version", meta.version},
+            {"plugin_type", meta.plugin_type},
+            {"local_installed", local_ok},
+            {"frontend_installed", frontend_ok},
+            {"frontend_name", frontend_name},
+            {"remote_results", remote_results},
+            {"warnings", warnings}
+        }.dump(), "application/json");
     });
 
     svr.Delete(R"(/api/plugins/(\w[\w-]*))", [this](const httplib::Request& req, httplib::Response& res) {
@@ -184,9 +604,28 @@ void HttpApi::setupRoutes() {
             res.set_content(R"({"error":"missing plugin file"})", "application/json");
             return;
         }
+
         auto file = req.get_file_value("plugin");
-        std::string name = req.get_param_value("name");
-        if (name.empty()) name = fs::path(file.filename).stem().string();
+        std::string name = req.has_param("name") ? req.get_param_value("name") : "";
+
+        std::string parse_error;
+        auto archive = unpackArchive(file.content, "tea_remote_plugin_", parse_error);
+        if (!archive) {
+            res.status = 400;
+            res.set_content(json{{"error", parse_error}}.dump(), "application/json");
+            return;
+        }
+
+        if (name.empty()) {
+            name = inferRuntimePluginName(*archive, file.filename);
+        }
+        cleanupArchive(*archive);
+
+        if (!isValidPluginName(name)) {
+            res.status = 400;
+            res.set_content(json{{"error", "invalid plugin name"}}.dump(), "application/json");
+            return;
+        }
 
         std::vector<uint8_t> data(file.content.begin(), file.content.end());
         bool ok = lemon_.installRemotePlugin(node_id, name, data);
@@ -302,29 +741,28 @@ void HttpApi::setupRoutes() {
             res.set_content(R"({"error":"missing plugin file"})", "application/json");
             return;
         }
+
         auto file = req.get_file_value("plugin");
-        std::string name = req.get_param_value("name");
-        if (name.empty()) name = fs::path(file.filename).stem().string();
+        std::string fallback_name = req.has_param("name") ? req.get_param_value("name") : "";
 
-        std::string plugin_dir = lemon_.frontendPluginsDir() + "/" + name;
-        std::string tar_path = "/tmp/tea_fe_plugin_" + name + ".tar.gz";
-
-        try {
-            {
-                std::ofstream out(tar_path, std::ios::binary);
-                out.write(file.content.data(), file.content.size());
-            }
-            fs::create_directories(plugin_dir);
-            std::string cmd = "tar -xzf " + tar_path + " -C " + plugin_dir;
-            int ret = std::system(cmd.c_str());
-            fs::remove(tar_path);
-
-            bool ok = (ret == 0);
-            res.set_content(json{{"success", ok}, {"name", name}}.dump(), "application/json");
-        } catch (const std::exception& e) {
-            res.status = 500;
-            res.set_content(json{{"error", e.what()}}.dump(), "application/json");
+        std::string parse_error;
+        auto archive = unpackArchive(file.content, "tea_frontend_plugin_", parse_error);
+        if (!archive) {
+            res.status = 400;
+            res.set_content(json{{"error", parse_error}}.dump(), "application/json");
+            return;
         }
+
+        auto result = installFrontendFromArchive(*archive, lemon_.frontendPluginsDir(), fallback_name);
+        cleanupArchive(*archive);
+
+        if (!result.success) {
+            res.status = 400;
+            res.set_content(json{{"error", result.error}}.dump(), "application/json");
+            return;
+        }
+
+        res.set_content(json{{"success", true}, {"name", result.name}}.dump(), "application/json");
     });
 
     svr.Delete(R"(/api/frontend-plugins/(\w[\w-]*))", [this](const httplib::Request& req, httplib::Response& res) {

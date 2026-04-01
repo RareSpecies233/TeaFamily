@@ -266,7 +266,7 @@ const data = await resp.json()
 
 ### 打包
 
-将插件打包为 `.tar.gz` 文件：
+将插件打包为 **统一插件包**（`.tar.gz`，包含运行时与前端）：
 
 ```bash
 cd plugins/my-plugin
@@ -277,14 +277,29 @@ tar czf my-plugin-1.0.0.tar.gz \
   frontend/
 ```
 
-### 安装
-
-通过 OrangeTea 界面的「插件管理」页面上传安装，或通过 API：
+推荐直接使用项目脚本导出统一包：
 
 ```bash
-curl -X POST http://localhost:9528/api/plugins/install \
-  -F "file=@my-plugin-1.0.0.tar.gz"
+./scripts/macOS_export_ssh_plugin.sh
+./scripts/macOS_export_file_manager_plugin.sh
+./scripts/macOS_export_monitor_plugin.sh
 ```
+
+导出结果示例：`ssh-unified-macos.tar.gz`
+
+### 安装
+
+通过 OrangeTea 的「统一插件管理台」上传安装，或通过 API：
+
+```bash
+curl -X POST http://localhost:9528/api/plugins/install-unified \
+  -F "plugin=@my-plugin-1.0.0.tar.gz" \
+  -F "target_clients=all"
+```
+
+可选参数：
+- `target_clients=all|selected|none`
+- `node_ids=node-a,node-b`（当 `target_clients=selected` 时生效）
 
 ## 安全建议
 

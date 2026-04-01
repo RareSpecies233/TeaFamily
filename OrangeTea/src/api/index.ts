@@ -41,6 +41,22 @@ export const installPlugin = (file: File, name?: string) => {
   })
 }
 
+export const installUnifiedPlugin = (
+  file: File,
+  targetClients: 'all' | 'selected' | 'none' = 'all',
+  nodeIds: string[] = []
+) => {
+  const fd = new FormData()
+  fd.append('plugin', file)
+  fd.append('target_clients', targetClients)
+  if (nodeIds.length) {
+    fd.append('node_ids', nodeIds.join(','))
+  }
+  return client().post('/api/plugins/install-unified', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
 // Remote plugin operations
 export const startRemotePlugin = (nodeId: string, name: string) =>
   client().post(`/api/clients/${nodeId}/plugins/${name}/start`)

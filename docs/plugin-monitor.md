@@ -2,8 +2,7 @@
 
 ## 插件类型
 - `distributed`（双端插件）
-- 需要 LemonTea 与 HoneyTea 安装运行时插件包
-- 可选安装 OrangeTea 前端插件包
+- 统一包会自动分发到 LemonTea / HoneyTea，并自动安装 OrangeTea 前端页面
 
 ## 导出（macOS）
 ```bash
@@ -11,13 +10,12 @@
 ```
 
 默认输出：
-- `dist/plugin-exports/monitor/monitor-runtime-macos.tar.gz`
-- `dist/plugin-exports/monitor/monitor-frontend-macos.tar.gz`
+- `dist/plugin-exports/monitor/monitor-unified-macos.tar.gz`
 
 ## 安装步骤
-1. 在 OrangeTea 的“LemonTea 插件”上传 `monitor-runtime-macos.tar.gz`。
-2. 在 OrangeTea 的“HoneyTea 插件”给目标客户端上传同一个运行时包。
-3. 在 OrangeTea 的“OrangeTea 前端插件”上传 `monitor-frontend-macos.tar.gz`。
+1. 在 OrangeTea 的“统一插件管理台”上传 `monitor-unified-macos.tar.gz`。
+2. 选择 HoneyTea 分发范围（全部在线 / 指定节点 / 不分发）。
+3. 安装完成后，可在同一页统一启停 LemonTea/HoneyTea 插件进程。
 
 ## 运行与控制 API
 - LemonTea 侧：
