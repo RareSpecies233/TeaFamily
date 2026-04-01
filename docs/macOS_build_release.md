@@ -17,11 +17,13 @@
 在项目根目录运行：
 
 ```bash
-./scripts/macOS_build_release.sh        # 正常构建
+./scripts/macOS_build_release.sh        # 正常构建并自动收集产物到 dist
 ./scripts/macOS_build_release.sh clean  # 清理再构建（删除 build-release 与 dist）
 ```
 
 脚本会自动检测 `npm`，若存在则进入 `OrangeTea` 并执行 `npm install`（若缺少 node_modules）和 `npm run build`，并把前端构建输出复制到 `dist/frontend`。
+
+> 新增：脚本现在优先尝试运行 `cmake --install`（如果 CMakeLists 有 `install()` 规则），若无安装规则则会使用回退策略在 `build-release` 中查找编译产物并复制到 `dist`，因此通常无需手动复制构建文件到 `dist`。
 
 ## 关键步骤（逐步说明）
 
@@ -48,6 +50,8 @@
    - 复制插件清单 `plugins/*/plugin.json` 到 `dist/plugins/<plugin>/`。
    - 复制插件前端（若存在 `plugins/<plugin>/frontend`）到 `dist/plugins/<plugin>/frontend/`。
    - 复制各组件的 `config.json` 到 `dist/config/`（文件名按组件命名）。
+
+  如果以上常规模式无法找到产物，脚本会执行回退查找（使用 `find`），在 `build-release` 下查找匹配的可执行文件并复制到相应位置。这样可覆盖不同 CMake 输出布局导致的路径差异。
 
 6. 构建前端
    - 如果可用 `npm`，会进入 `OrangeTea`：若 `node_modules` 缺失则先 `npm install`，再 `npm run build`，并把 `OrangeTea/dist/*` 拷贝到 `dist/frontend/`。
