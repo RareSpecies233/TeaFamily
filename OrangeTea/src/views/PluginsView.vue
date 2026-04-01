@@ -533,6 +533,12 @@ onMounted(refreshAll)
 <style scoped>
 .plugins-page {
   min-height: calc(100vh - 40px);
+  min-width: 760px;
+  overflow-x: auto;
+}
+
+.el-table {
+  min-width: 760px;
 }
 
 
