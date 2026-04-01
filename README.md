@@ -36,6 +36,8 @@ TeaFamily 是一套分布式进程管理系统，包含以下组件：
 ./scripts/macOS_build_release.sh
 ```
 
+更多脚本说明见 [macOS 构建脚本说明](docs/macOS_build_release.md)
+
 ### 手动构建
 ```bash
 mkdir build && cd build
@@ -163,5 +165,3 @@ serve -s /opt/teafamily/frontend -l 8080
       - 可以。`HoneyTea`/`LemonTea` 管理的是任意可执行文件，插件或子进程可以用 Python、Go、Rust、Shell 等语言实现。
       - 如果插件与父进程通过 stdio 使用 JSON-line 协议通信，请确保插件实现了相应的 JSON-line 输入/输出（例如 Python 使用 `sys.stdin.readline()` 与 `print(json.dumps(...), flush=True)`）。
       - 对于脚本语言，请确保目标机器安装相应运行时（如 `python3`），并且脚本具有可执行权限和正确的 shebang（如 `#!/usr/bin/env python3`）。
-
-如果需要，我可以把上面的 `systemd` 单元、`launchd` 示例和静态服务器示例写成可直接复制的文件。

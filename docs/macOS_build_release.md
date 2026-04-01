@@ -1,0 +1,105 @@
+# macOS 构建脚本说明（scripts/macOS_build_release.sh）
+
+## 概述
+
+`scripts/macOS_build_release.sh` 是一个用于 macOS 的打包/发布辅助脚本，自动完成 CMake 构建、收集二进制、复制插件与配置，以及构建并拷贝 OrangeTea 前端静态文件到 `dist` 目录，最终生成可部署的 `dist` 包。
+
+此文档说明脚本的行为、产物位置、常见修改点与故障排查提示。
+
+## 脚本目的
+
+- 在 `build-release` 中运行 CMake/编译（Release 模式）。
+- 将可执行文件、插件、配置、插件前端与 OrangeTea 前端构建结果收集到 `dist`（默认 `PROJECT_ROOT/dist`）。
+- 便于一次性把所有运行时产物打包到一个目录，便于复制到服务器/客户端部署。
+
+## 使用方法
+
+在项目根目录运行：
+
+```bash
+./scripts/macOS_build_release.sh        # 正常构建
+./scripts/macOS_build_release.sh clean  # 清理再构建（删除 build-release 与 dist）
+```
+
+脚本会自动检测 `npm`，若存在则进入 `OrangeTea` 并执行 `npm install`（若缺少 node_modules）和 `npm run build`，并把前端构建输出复制到 `dist/frontend`。
+
+## 关键步骤（逐步说明）
+
+1. 变量与路径计算
+   - `SCRIPT_DIR`：脚本所在目录
+   - `PROJECT_ROOT`：脚本的上级目录（项目根）
+   - `BUILD_DIR`：默认 `PROJECT_ROOT/build-release`
+   - `INSTALL_DIR`：默认 `PROJECT_ROOT/dist`
+
+2. 可选清理
+   - 传入 `clean` 参数会删除 `build-release` 与 `dist` 目录。
+
+3. CMake 配置
+   - 使用 `-DCMAKE_BUILD_TYPE=Release`
+   - 在 macOS 上会设置 `-DCMAKE_OSX_ARCHITECTURES=$(uname -m)`，以便为当前架构生成二进制。
+
+4. 编译
+   - 使用本机逻辑 CPU 数（`sysctl -n hw.logicalcpu`）作为并行编译线程数，并执行 `cmake --build`。
+
+5. 收集产物到 `dist`
+   - 创建 `dist/bin`、`dist/plugins`、`dist/config`。
+   - 复制主程序：`GreenTea`、`HoneyTea`、`LemonTea` 的可执行文件到 `dist/bin`。
+   - 复制插件：遍历 `build-release/plugins/*/`，将可执行文件复制到 `dist/plugins/<plugin>/`。
+   - 复制插件清单 `plugins/*/plugin.json` 到 `dist/plugins/<plugin>/`。
+   - 复制插件前端（若存在 `plugins/<plugin>/frontend`）到 `dist/plugins/<plugin>/frontend/`。
+   - 复制各组件的 `config.json` 到 `dist/config/`（文件名按组件命名）。
+
+6. 构建前端
+   - 如果可用 `npm`，会进入 `OrangeTea`：若 `node_modules` 缺失则先 `npm install`，再 `npm run build`，并把 `OrangeTea/dist/*` 拷贝到 `dist/frontend/`。
+
+## 产物结构（例）
+
+```
+dist/
+  bin/
+    LemonTea
+    HoneyTea
+    GreenTea
+  plugins/
+    ssh/
+      plugin.json
+      frontend/
+    file-manager/
+      ...
+  config/
+    GreenTea.json
+    HoneyTea.json
+    LemonTea.json
+  frontend/   # OrangeTea 的生产构建文件
+```
+
+## 部署与运行示例
+
+将 `dist` 复制到目标主机，例如 `/opt/teafamily`，然后在目标主机上运行：
+
+```bash
+cd /opt/teafamily
+mkdir -p logs
+./bin/LemonTea > logs/lemontea.log 2>&1 &
+./bin/GreenTea > logs/greentea.log 2>&1 &
+./bin/HoneyTea > logs/honeytea.log 2>&1 &
+```
+
+建议在生产环境通过 `systemd`（Linux）或 `launchd`（macOS）管理进程，便于开机自启与日志集中管理。
+
+## 在 Raspberry Pi / ARM 平台上的注意事项
+
+- `scripts/macOS_build_release.sh` 默认为 macOS 环境设计（使用 `sysctl`、`CMAKE_OSX_ARCHITECTURES` 等）。要在树莓派（ARM）上运行：
+  - 建议在目标设备（树莓派）上直接执行 CMake 构建；或使用交叉编译生成 ARM 二进制并将其放入 `dist`。
+  - 确保插件与 HoneyTea/HoneyTea 本身都为相同架构编译。
+
+## 常见问题与排查
+
+- 构建失败：首先检查 `cmake`、编译器（Xcode/clang）和依赖（nlohmann/json、spdlog、cpp-httplib）是否可用。可在 `build-release` 目录手动运行 `cmake`/`make` 查看更详细错误。
+- 前端构建失败：进入 `OrangeTea` 目录单独运行 `npm install` / `npm run build`，修复依赖或类型错误（TypeScript）后重试脚本。
+- 插件未被复制：脚本只复制被识别为可执行文件的条目（`-x`）。若插件为脚本（如 Python），请确保设置了 shebang 并赋予可执行权限（`chmod +x`）。
+
+## 可定制点
+
+- 将 `INSTALL_DIR` 改为其他目录以符合你的部署结构。
+- 若希望在 Linux 上使用，移除或修改 macOS 专属的 `CMAKE_OSX_ARCHITECTURES` 与 `sysctl` 调用（可改用 `nproc`）。
