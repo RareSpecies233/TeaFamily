@@ -248,11 +248,33 @@ void LemonTea::heartbeatCheckLoop() {
 }
 
 void LemonTea::handlePluginOutput(const std::string& plugin, const tea::json& msg) {
-    std::string event = msg.value("event", "");
-    if (event == "message") {
-        std::string target = msg.value("target", "");
+    std::string event = msg.value("event", msg.value("action", std::string("")));
+
+    if (event == "message" || event == "plugin_message") {
+        // target_plugin + target_node enables A->B plugin messaging on LemonTea or remote HoneyTea.
+        std::string target_plugin = msg.value("target_plugin", msg.value("plugin", std::string("")));
+        std::string target_node = msg.value("target_node", msg.value("target", std::string("")));
         auto data = msg.value("data", tea::json::object());
-        sendPluginMessage(target, plugin, data);
+        if (!data.is_object()) {
+            data = tea::json{{"value", data}};
+        }
+        data["from_plugin"] = plugin;
+        data["from_node"] = node_id_;
+
+        if (target_plugin.empty()) {
+            spdlog::warn("Plugin '{}' emitted message without target_plugin", plugin);
+            return;
+        }
+
+        if (target_node.empty() || target_node == node_id_) {
+            if (!plugin_mgr_->sendToPlugin(target_plugin, data)) {
+                spdlog::warn("Failed to deliver plugin message {} -> {} on LemonTea", plugin, target_plugin);
+            }
+        } else {
+            if (!sendPluginMessage(target_node, target_plugin, data)) {
+                spdlog::warn("Failed to relay plugin message {} -> {}@{}", plugin, target_plugin, target_node);
+            }
+        }
     } else if (event == "ready") {
         spdlog::info("Local plugin '{}' is ready", plugin);
     } else if (event == "error") {
@@ -271,6 +293,13 @@ bool LemonTea::stopRemotePlugin(const std::string& node_id, const std::string& n
     auto conn = tcp_server_->getConnection(node_id);
     if (!conn) return false;
     conn->send(tea::Message::makePluginStop(name));
+    return true;
+}
+
+bool LemonTea::uninstallRemotePlugin(const std::string& node_id, const std::string& name) {
+    auto conn = tcp_server_->getConnection(node_id);
+    if (!conn) return false;
+    conn->send({tea::MsgType::PLUGIN_UNINSTALL, {{"name", name}}});
     return true;
 }
 

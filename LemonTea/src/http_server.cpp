@@ -107,6 +107,7 @@ void HttpApi::setupRoutes() {
             list.push_back({
                 {"name", p.name}, {"version", p.version},
                 {"description", p.description},
+                {"plugin_type", p.plugin_type},
                 {"state", tea::pluginStateStr(p.state)},
                 {"pid", p.pid}, {"has_frontend", p.has_frontend},
                 {"auto_start", p.auto_start}
@@ -165,6 +166,14 @@ void HttpApi::setupRoutes() {
         auto name = req.matches[2].str();
         bool ok = lemon_.stopRemotePlugin(node_id, name);
         res.set_content(json{{"success", ok}}.dump(), "application/json");
+    });
+
+    svr.Delete(R"(/api/clients/(\w[\w-]*)/plugins/(\w[\w-]*))",
+        [this](const httplib::Request& req, httplib::Response& res) {
+        auto node_id = req.matches[1].str();
+        auto name = req.matches[2].str();
+        bool ok = lemon_.uninstallRemotePlugin(node_id, name);
+        res.set_content(json{{"success", ok}, {"name", name}}.dump(), "application/json");
     });
 
     svr.Post(R"(/api/clients/(\w[\w-]*)/plugins/install)",
@@ -315,6 +324,20 @@ void HttpApi::setupRoutes() {
         } catch (const std::exception& e) {
             res.status = 500;
             res.set_content(json{{"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    svr.Delete(R"(/api/frontend-plugins/(\w[\w-]*))", [this](const httplib::Request& req, httplib::Response& res) {
+        auto name = req.matches[1].str();
+        std::string plugin_dir = lemon_.frontendPluginsDir() + "/" + name;
+        try {
+            if (fs::exists(plugin_dir)) {
+                fs::remove_all(plugin_dir);
+            }
+            res.set_content(json{{"success", true}, {"name", name}}.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 500;
+            res.set_content(json{{"success", false}, {"error", e.what()}}.dump(), "application/json");
         }
     });
 

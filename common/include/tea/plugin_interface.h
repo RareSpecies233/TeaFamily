@@ -13,6 +13,8 @@ using json = nlohmann::json;
 //   "version": "1.0.0",
 //   "description": "SSH remote terminal plugin",
 //   "binary": "ssh_plugin",
+//   "server_binary": "server/tea-plugin-ssh-server",
+//   "client_binary": "client/tea-plugin-ssh-client",
 //   "comm_type": "stdio",         // "stdio" | "tcp" | "udp"
 //   "comm_port": 0,               // only for tcp/udp
 //   "auto_start": false,
@@ -20,7 +22,8 @@ using json = nlohmann::json;
 //   "frontend_entry": "SSHView.vue",
 //   "frontend_files": ["SSHView.vue"],
 //   "capabilities": ["terminal"],
-//   "role": "both"                // "client" | "server" | "both"
+//   "role": "both",               // "client" | "server" | "both"
+//   "plugin_type": "distributed"  // "distributed" | "lemon-only"
 // }
 
 struct PluginManifest {
@@ -28,6 +31,8 @@ struct PluginManifest {
     std::string version;
     std::string description;
     std::string binary;
+    std::string server_binary;
+    std::string client_binary;
     std::string comm_type = "stdio";
     uint16_t    comm_port = 0;
     bool        auto_start = false;
@@ -36,6 +41,8 @@ struct PluginManifest {
     std::vector<std::string> frontend_files;
     std::vector<std::string> capabilities;
     std::string role = "both";  // client, server, both
+    std::string plugin_type = "distributed"; // distributed, lemon-only
+    std::vector<std::string> depends_on;
 
     static PluginManifest fromJson(const json& j) {
         PluginManifest m;
@@ -43,7 +50,9 @@ struct PluginManifest {
         m.version = j.value("version", "0.0.0");
         m.description = j.value("description", "");
         m.binary = j.value("binary", "");
-        m.comm_type = j.value("comm_type", "stdio");
+        m.server_binary = j.value("server_binary", "");
+        m.client_binary = j.value("client_binary", "");
+        m.comm_type = j.value("comm_type", j.value("communication", std::string("stdio")));
         m.comm_port = j.value("comm_port", 0);
         m.auto_start = j.value("auto_start", false);
         m.has_frontend = j.value("has_frontend", false);
@@ -51,6 +60,8 @@ struct PluginManifest {
         m.frontend_files = j.value("frontend_files", std::vector<std::string>{});
         m.capabilities = j.value("capabilities", std::vector<std::string>{});
         m.role = j.value("role", "both");
+        m.plugin_type = j.value("plugin_type", "distributed");
+        m.depends_on = j.value("depends_on", std::vector<std::string>{});
         return m;
     }
 
@@ -60,6 +71,8 @@ struct PluginManifest {
             {"version", version},
             {"description", description},
             {"binary", binary},
+            {"server_binary", server_binary},
+            {"client_binary", client_binary},
             {"comm_type", comm_type},
             {"comm_port", comm_port},
             {"auto_start", auto_start},
@@ -67,7 +80,9 @@ struct PluginManifest {
             {"frontend_entry", frontend_entry},
             {"frontend_files", frontend_files},
             {"capabilities", capabilities},
-            {"role", role}
+            {"role", role},
+            {"plugin_type", plugin_type},
+            {"depends_on", depends_on}
         };
     }
 };

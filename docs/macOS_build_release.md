@@ -11,6 +11,7 @@
 - 在 `build-release` 中运行 CMake/编译（Release 模式）。
 - 将可执行文件、插件、配置、插件前端与 OrangeTea 前端构建结果收集到 `dist`（默认 `PROJECT_ROOT/dist`）。
 - 便于一次性把所有运行时产物打包到一个目录，便于复制到服务器/客户端部署。
+- 每次打包会清空并重建 `dist/frontend_plugins`，保证 OrangeTea 默认无已安装前端插件。
 
 ## 使用方法
 
@@ -98,6 +99,20 @@ mkdir -p logs
 - `scripts/macOS_build_release.sh` 默认为 macOS 环境设计（使用 `sysctl`、`CMAKE_OSX_ARCHITECTURES` 等）。要在树莓派（ARM）上运行：
   - 建议在目标设备（树莓派）上直接执行 CMake 构建；或使用交叉编译生成 ARM 二进制并将其放入 `dist`。
   - 确保插件与 HoneyTea/HoneyTea 本身都为相同架构编译。
+
+## 插件导出脚本（macOS）
+
+为了独立分发三个内置插件，项目新增了以下导出脚本：
+
+```bash
+./scripts/macOS_export_ssh_plugin.sh
+./scripts/macOS_export_file_manager_plugin.sh
+./scripts/macOS_export_monitor_plugin.sh
+```
+
+每个脚本会生成两类包：
+- 运行时插件包：`<plugin>-runtime-macos.tar.gz`（用于 LemonTea/HoneyTea 安装）
+- 前端插件包：`<plugin>-frontend-macos.tar.gz`（用于 OrangeTea 前端插件安装）
 
 ## 常见问题与排查
 

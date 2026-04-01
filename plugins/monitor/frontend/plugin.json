@@ -1,6 +1,9 @@
 {
   "name": "monitor",
   "version": "1.0.0",
-  "entry": "MonitorView.vue",
+  "entry": "index.js",
+  "title": "系统监控",
+  "icon": "chart",
+  "route": "/plugin/monitor",
   "description": "系统监控面板"
 }

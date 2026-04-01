@@ -27,6 +27,8 @@ const connectionStore = useConnectionStore()
   flex: 1;
   overflow: auto;
   padding: 20px;
-  background: #f5f7fa;
+  background:
+    radial-gradient(circle at 100% 0, rgba(255, 213, 138, 0.35), transparent 30%),
+    linear-gradient(180deg, #fffaf0 0%, #f7f2e7 100%);
 }
 </style>

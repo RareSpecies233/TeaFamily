@@ -6,6 +6,7 @@ export interface PluginInfo {
   name: string
   version: string
   description: string
+  plugin_type?: string
   state: string
   pid: number
   has_frontend: boolean

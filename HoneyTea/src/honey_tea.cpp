@@ -158,6 +158,7 @@ void HoneyTea::onMessage(tea::TcpConnection::Ptr conn, const tea::Message& msg) 
             for (const auto& p : plugins) {
                 list.push_back({
                     {"name", p.name}, {"version", p.version},
+                    {"plugin_type", p.plugin_type},
                     {"state", tea::pluginStateStr(p.state)},
                     {"pid", p.pid}, {"has_frontend", p.has_frontend}
                 });
@@ -179,6 +180,14 @@ void HoneyTea::onMessage(tea::TcpConnection::Ptr conn, const tea::Message& msg) 
             bool ok = plugin_mgr_->stopPlugin(name);
             conn->send({tea::MsgType::PLUGIN_STOP_ACK,
                        {{"name", name}, {"success", ok}}});
+            break;
+        }
+
+        case tea::MsgType::PLUGIN_UNINSTALL: {
+            std::string name = msg.payload.value("name", "");
+            bool ok = plugin_mgr_->uninstallPlugin(name);
+            conn->send({tea::MsgType::PLUGIN_STOP_ACK,
+                       {{"name", name}, {"success", ok}, {"op", "uninstall"}}});
             break;
         }
 
@@ -248,14 +257,20 @@ void HoneyTea::reconnectLoop() {
 }
 
 void HoneyTea::handlePluginOutput(const std::string& plugin, const tea::json& msg) {
-    std::string event = msg.value("event", "");
+    std::string event = msg.value("event", msg.value("action", std::string("")));
 
-    if (event == "message") {
+    if (event == "message" || event == "plugin_message") {
         // Forward to server
-        std::string target = msg.value("target", "");
+        std::string target = msg.value("target_node", msg.value("target", std::string("")));
+        std::string target_plugin = msg.value("target_plugin", msg.value("plugin", plugin));
         auto data = msg.value("data", tea::json::object());
+        if (!data.is_object()) {
+            data = tea::json{{"value", data}};
+        }
+        data["from_plugin"] = plugin;
+        data["from_node"] = node_id_;
         if (server_conn_ && server_conn_->isConnected()) {
-            server_conn_->send(tea::Message::makeChildMsg(plugin, target, data));
+            server_conn_->send(tea::Message::makeChildMsg(target_plugin, target, data));
         }
     } else if (event == "ready") {
         spdlog::info("Plugin '{}' is ready", plugin);

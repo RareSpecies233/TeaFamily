@@ -39,6 +39,7 @@ public:
     // Remote HoneyTea operations
     bool startRemotePlugin(const std::string& node_id, const std::string& name);
     bool stopRemotePlugin(const std::string& node_id, const std::string& name);
+    bool uninstallRemotePlugin(const std::string& node_id, const std::string& name);
     void requestRemotePluginList(const std::string& node_id);
     bool installRemotePlugin(const std::string& node_id, const std::string& name,
                              const std::vector<uint8_t>& data);

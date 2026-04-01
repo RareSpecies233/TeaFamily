@@ -63,6 +63,7 @@ struct PluginInfo {
     std::string  name;
     std::string  version;
     std::string  description;
+    std::string  plugin_type; // distributed, lemon-only
     std::string  binary_path;
     std::string  comm_type;   // "stdio", "tcp", "udp"
     uint16_t     comm_port = 0;

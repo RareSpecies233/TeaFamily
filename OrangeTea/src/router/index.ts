@@ -5,18 +5,12 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      name: 'dashboard',
-      component: () => import('@/views/DashboardView.vue'),
+      redirect: '/plugins',
     },
     {
       path: '/plugins',
       name: 'plugins',
       component: () => import('@/views/PluginsView.vue'),
-    },
-    {
-      path: '/clients',
-      name: 'clients',
-      component: () => import('@/views/ClientsView.vue'),
     },
     {
       path: '/update',

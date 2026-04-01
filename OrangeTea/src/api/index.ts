@@ -47,6 +47,9 @@ export const startRemotePlugin = (nodeId: string, name: string) =>
 export const stopRemotePlugin = (nodeId: string, name: string) =>
   client().post(`/api/clients/${nodeId}/plugins/${name}/stop`)
 
+export const deleteRemotePlugin = (nodeId: string, name: string) =>
+  client().delete(`/api/clients/${nodeId}/plugins/${name}`)
+
 export const installRemotePlugin = (nodeId: string, file: File, name?: string) => {
   const fd = new FormData()
   fd.append('plugin', file)
@@ -91,3 +94,6 @@ export const installFrontendPlugin = (file: File, name?: string) => {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
+
+export const deleteFrontendPlugin = (name: string) =>
+  client().delete(`/api/frontend-plugins/${name}`)

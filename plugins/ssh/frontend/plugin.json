@@ -1,6 +1,9 @@
 {
   "name": "ssh",
   "version": "1.0.0",
-  "entry": "SSHView.vue",
+  "entry": "index.js",
+  "title": "SSH 终端",
+  "icon": "terminal",
+  "route": "/plugin/ssh",
   "description": "SSH 远程终端"
 }

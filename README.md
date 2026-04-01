@@ -59,6 +59,21 @@ make -j$(nproc)
 
 详见 [插件开发文档](docs/plugin-development.md)
 
+插件使用文档：
+- [SSH 插件](docs/plugin-ssh.md)
+- [文件管理插件](docs/plugin-file-manager.md)
+- [监控插件](docs/plugin-monitor.md)
+
+LemonTea HTTP API：
+- [API 文档](docs/lemontea-api.md)
+
+macOS 插件导出脚本：
+```bash
+./scripts/macOS_export_ssh_plugin.sh
+./scripts/macOS_export_file_manager_plugin.sh
+./scripts/macOS_export_monitor_plugin.sh
+```
+
 ## OrangeTea 前端
 
 ```bash

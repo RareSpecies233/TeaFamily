@@ -1,6 +1,9 @@
 {
   "name": "file-manager",
   "version": "1.0.0",
-  "entry": "FileManagerView.vue",
+  "entry": "index.js",
+  "title": "文件管理",
+  "icon": "folder",
+  "route": "/plugin/file-manager",
   "description": "远程文件管理器"
 }

@@ -34,6 +34,8 @@ plugins/my-plugin/
   "version": "1.0.0",
   "description": "我的自定义插件",
   "author": "Your Name",
+  "plugin_type": "distributed",
+  "depends_on": ["another-plugin"],
   "capabilities": ["custom-feature"],
   "communication": "stdio",
   "has_frontend": true,
@@ -48,11 +50,17 @@ plugins/my-plugin/
 | `version` | ✅ | 语义化版本号 |
 | `description` | ✅ | 插件描述 |
 | `author` | ❌ | 作者信息 |
+| `plugin_type` | ✅ | 插件类型：`distributed`（LemonTea+HoneyTea）或 `lemon-only`（仅 LemonTea） |
+| `depends_on` | ❌ | 依赖的其他 LemonTea 插件（用于插件间通信） |
 | `capabilities` | ❌ | 功能标签列表 |
 | `communication` | ✅ | 通信方式：`stdio` / `tcp` / `udp` |
 | `has_frontend` | ❌ | 是否包含前端组件 |
 | `server_binary` | ❌ | 服务端可执行文件相对路径 |
 | `client_binary` | ❌ | 客户端可执行文件相对路径 |
+
+说明：
+- `distributed`：同一个插件需要在 LemonTea 与 HoneyTea 同时安装。
+- `lemon-only`：插件只在 LemonTea 安装与运行，HoneyTea 不注册该插件进程。
 
 ## 通信协议
 
@@ -189,10 +197,15 @@ int main() {
 {
   "name": "my-plugin",
   "version": "1.0.0",
-  "entry": "MyPluginView.vue",
+  "entry": "index.js",
+  "title": "我的插件",
+  "icon": "custom",
+  "route": "/plugin/my-plugin",
   "description": "我的插件界面"
 }
 ```
+
+建议将 `entry` 指向可直接被浏览器加载的 ESM 文件（如 `index.js`），避免直接分发 `.vue` SFC 文件导致运行时无法解析。
 
 ### Vue 组件接口
 

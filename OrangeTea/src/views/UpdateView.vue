@@ -136,18 +136,24 @@ onMounted(fetchClients)
 
 <style scoped>
 .update-page h2 {
-  color: #333;
+  color: #2f2310;
   margin-bottom: 20px;
 }
 
 .tip {
-  color: #666;
+  color: #7f6841;
   font-size: 13px;
   margin-bottom: 12px;
 }
 
 .upload-icon {
   font-size: 40px;
-  color: #c0c4cc;
+  color: #c8ae7f;
+}
+
+:deep(.el-card) {
+  border-radius: 14px;
+  border: 1px solid #e9dec8;
+  box-shadow: 0 10px 26px rgba(128, 92, 31, 0.08);
 }
 </style>

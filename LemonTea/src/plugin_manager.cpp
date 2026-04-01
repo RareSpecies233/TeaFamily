@@ -38,11 +38,18 @@ void PluginManager::loadManifest(const std::string& dir) {
         auto manifest = tea::PluginManifest::fromJson(j);
         if (manifest.name.empty()) return;
 
-        // LemonTea runs server-side plugin binaries.
+        // LemonTea plugin run policy.
+        std::string plugin_type = j.value("plugin_type", manifest.plugin_type);
         std::string role = j.value("role", std::string("both"));
-        bool run_on_lemon = (role != "client");
+        bool run_on_lemon = (plugin_type != "honey-only");
+        if (!j.contains("plugin_type")) {
+            run_on_lemon = (role != "client");
+        }
 
         std::string binary_rel = manifest.binary;
+        if (binary_rel.empty()) {
+            binary_rel = manifest.server_binary;
+        }
         if (binary_rel.empty()) {
             binary_rel = j.value("server_binary", std::string(""));
         }
@@ -52,6 +59,9 @@ void PluginManager::loadManifest(const std::string& dir) {
             binary = dir + "/" + binary_rel;
             if (!fs::exists(binary)) {
                 binary = dir + "/" + fs::path(binary_rel).filename().string();
+            }
+            if (fs::exists(binary)) {
+                binary = fs::absolute(binary).lexically_normal().string();
             }
         }
 
@@ -152,6 +162,7 @@ std::vector<tea::PluginInfo> PluginManager::getPlugins() const {
         info.name = manifest.name;
         info.version = manifest.version;
         info.description = manifest.description;
+        info.plugin_type = manifest.plugin_type;
         info.binary_path = manifest.binary;
         info.comm_type = manifest.comm_type;
         info.comm_port = manifest.comm_port;

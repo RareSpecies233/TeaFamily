@@ -46,6 +46,10 @@ cmake --build . --config Release -j "$NPROC"
 echo "[3/4] Collecting build artifacts..."
 mkdir -p "$INSTALL_DIR"/{bin,plugins,config}
 
+# OrangeTea runtime must not include pre-installed frontend plugins.
+rm -rf "$INSTALL_DIR/frontend_plugins"
+mkdir -p "$INSTALL_DIR/frontend_plugins"
+
 # Keep dist runtime-only (no headers/cmake metadata from third-party install rules).
 rm -rf "$INSTALL_DIR/include" "$INSTALL_DIR/lib" "$INSTALL_DIR/share" "$INSTALL_DIR/cmake"
 

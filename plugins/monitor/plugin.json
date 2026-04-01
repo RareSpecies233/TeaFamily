@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "description": "系统监控插件（CPU/内存/磁盘/温度）",
   "author": "TeaFamily",
+  "plugin_type": "distributed",
+  "depends_on": ["file-manager"],
   "capabilities": ["metrics", "realtime"],
   "communication": "stdio",
   "has_frontend": true,

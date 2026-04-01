@@ -45,7 +45,10 @@ async function loadPluginFrontend() {
     const plugins: any[] = resp.data.plugins || []
     const found = plugins.find((p: any) => p.name === pluginName.value)
     if (found) {
-      pluginUrl.value = `/api/frontend-plugins/${pluginName.value}/index.js`
+      const entry = found.entry || 'index.js'
+      pluginUrl.value = `/api/frontend-plugins/${pluginName.value}/${entry}`
+    } else {
+      error.value = '未找到对应的前端插件'
     }
   } catch (e: any) {
     error.value = '加载插件前端失败: ' + (e.message || '未知错误')

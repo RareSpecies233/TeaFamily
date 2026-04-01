@@ -28,7 +28,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180">
+        <el-table-column label="操作" width="240">
           <template #default="{ row }">
             <el-button-group>
               <el-button
@@ -46,6 +46,14 @@
                 :disabled="row.state !== 'running'"
               >
                 停止
+              </el-button>
+              <el-button
+                size="small"
+                type="danger"
+                @click="deleteRemote(client.node_id, row.name)"
+                :disabled="row.state === 'running'"
+              >
+                删除
               </el-button>
             </el-button-group>
           </template>
@@ -116,6 +124,16 @@ async function stopRemote(nodeId: string, name: string) {
     setTimeout(() => refreshClient(nodeId), 1000)
   } catch {
     ElMessage.error('操作失败')
+  }
+}
+
+async function deleteRemote(nodeId: string, name: string) {
+  try {
+    await api.deleteRemotePlugin(nodeId, name)
+    ElMessage.success(`已发送删除命令: ${name}`)
+    setTimeout(() => refreshClient(nodeId), 1200)
+  } catch {
+    ElMessage.error('删除失败')
   }
 }
 

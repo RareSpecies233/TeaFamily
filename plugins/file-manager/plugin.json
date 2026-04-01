@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "description": "远程文件管理插件",
   "author": "TeaFamily",
+  "plugin_type": "distributed",
+  "depends_on": [],
   "capabilities": ["file-browse", "file-upload", "file-download"],
   "communication": "stdio",
   "has_frontend": true,
