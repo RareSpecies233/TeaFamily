@@ -251,6 +251,7 @@ function shortPluginLabel(value: string) {
 .sidebar {
   width: var(--tea-sidebar-width);
   min-width: var(--tea-sidebar-width);
+  flex: 0 0 var(--tea-sidebar-width);
   background:
     radial-gradient(circle at 0 0, rgba(255, 196, 111, 0.35), transparent 35%),
     radial-gradient(circle at 100% 100%, rgba(146, 223, 207, 0.3), transparent 38%),
@@ -258,6 +259,7 @@ function shortPluginLabel(value: string) {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  overflow: hidden;
   border-right: 1px solid #e6d7c0;
   transition: width 220ms ease, min-width 220ms ease;
 }
@@ -265,6 +267,7 @@ function shortPluginLabel(value: string) {
 .sidebar.collapsed {
   width: var(--tea-sidebar-collapsed-width);
   min-width: var(--tea-sidebar-collapsed-width);
+  flex-basis: var(--tea-sidebar-collapsed-width);
 }
 
 .sidebar-header {
@@ -272,6 +275,7 @@ function shortPluginLabel(value: string) {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 78px;
   border-bottom: 1px solid #e6d7c0;
   position: relative;
 }
@@ -279,23 +283,32 @@ function shortPluginLabel(value: string) {
 .collapse-toggle {
   margin-left: auto;
   color: #6f5c3f;
-  width: 30px;
-  height: 30px;
+  width: 30px !important;
+  min-width: 30px !important;
+  height: 30px !important;
+  padding: 0 !important;
   border-radius: 9px;
+  flex-shrink: 0;
 }
 
 .sidebar.collapsed .sidebar-header {
   justify-content: flex-end;
-  padding: 10px 8px;
+  min-height: 48px;
+  padding: 8px 10px;
 }
 
 .sidebar.collapsed .collapse-toggle {
   margin-left: 0;
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
 }
 
 .sidebar-logo {
   width: 38px;
   height: 38px;
+  min-width: 38px;
+  flex-shrink: 0;
   border-radius: 11px;
   display: grid;
   place-items: center;
@@ -327,6 +340,7 @@ function shortPluginLabel(value: string) {
   border-right: none;
   flex: 1;
   padding: 10px;
+  overflow-x: hidden;
 }
 
 :deep(.el-menu-item), :deep(.el-sub-menu__title) {
@@ -371,6 +385,8 @@ function shortPluginLabel(value: string) {
 }
 
 .sidebar.collapsed .sidebar-footer {
+  display: flex;
+  justify-content: center;
   padding: 10px 8px 14px;
 }
 
@@ -412,16 +428,23 @@ function shortPluginLabel(value: string) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  align-items: stretch;
 }
 
 .action-button {
   width: 100%;
+  min-width: 0;
+  height: 34px !important;
+  padding: 0 10px !important;
   margin: 0;
   border-radius: 10px;
   border: 1px solid #dfcfb4;
   background: rgba(255, 255, 255, 0.82);
   color: #5a4725;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .action-button:hover,
@@ -440,6 +463,7 @@ function shortPluginLabel(value: string) {
 
 .connection-mini {
   width: 46px;
+  min-width: 46px;
   height: 46px;
   display: flex;
   align-items: center;
@@ -450,10 +474,12 @@ function shortPluginLabel(value: string) {
   padding: 0;
   cursor: pointer;
   margin: 0 auto;
+  flex-shrink: 0;
 }
 
 .status-icon {
   font-size: 24px;
+  line-height: 1;
 }
 
 .status-icon.online {

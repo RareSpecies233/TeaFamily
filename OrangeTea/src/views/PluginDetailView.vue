@@ -177,12 +177,16 @@ onMounted(loadPluginFrontend)
 
 .title-wrap {
   text-align: center;
+  min-width: 0;
 }
 
 .plugin-detail-page h2 {
   margin: 0;
   color: #2f2310;
   font-size: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .title-wrap p {
@@ -193,7 +197,9 @@ onMounted(loadPluginFrontend)
 
 .header-btn {
   min-width: 102px;
+  flex-shrink: 0;
   height: 36px;
+  padding: 0 14px !important;
   border-radius: 11px;
   border: 1px solid #dfcfb1;
   background: rgba(255, 255, 255, 0.84);

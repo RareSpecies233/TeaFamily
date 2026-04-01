@@ -16,10 +16,12 @@ import Sidebar from '@/components/Sidebar.vue'
   display: flex;
   height: 100vh;
   overflow: hidden;
+  min-width: 0;
 }
 
 .main-content {
   flex: 1;
+  min-width: 0;
   overflow: auto;
   padding: 20px;
   background:

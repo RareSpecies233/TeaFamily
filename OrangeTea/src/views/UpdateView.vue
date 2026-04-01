@@ -2,12 +2,13 @@
   <div class="update-page">
     <header class="hero">
       <div class="hero-left">
-      <h2>程序更新</h2>
+        <h2>程序更新</h2>
+        <p>上传 LemonTea 或 HoneyTea 可执行文件并执行更新流程</p>
       </div>
     </header>
-    
+
     <el-row :gutter="20">
-      <el-col :span="12">
+      <el-col :xs="24" :md="12" class="card-col">
         <el-card>
           <template #header>
             <strong>更新 LemonTea（服务端）</strong>
@@ -34,7 +35,7 @@
         </el-card>
       </el-col>
 
-      <el-col :span="12">
+      <el-col :xs="24" :md="12" class="card-col">
         <el-card>
           <template #header>
             <strong>更新 HoneyTea（客户端）</strong>
@@ -139,9 +140,32 @@ onMounted(fetchClients)
 </script>
 
 <style scoped>
-.update-page h2 {
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background:
+    radial-gradient(circle at 12% 20%, rgba(255, 239, 190, 0.9), transparent 40%),
+    linear-gradient(135deg, #fff5df 0%, #ffefdc 40%, #ecfffb 100%);
+  border: 1px solid #f0dfbd;
+  border-radius: 18px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+
+.hero h2 {
   color: #2f2310;
-  margin-bottom: 20px;
+  margin: 0;
+  letter-spacing: 0.2px;
+}
+
+.hero p {
+  margin: 8px 0 0;
+  color: #7d6841;
+}
+
+.card-col {
+  margin-bottom: 16px;
 }
 
 .tip {
@@ -159,5 +183,6 @@ onMounted(fetchClients)
   border-radius: 14px;
   border: 1px solid #e9dec8;
   box-shadow: 0 10px 26px rgba(128, 92, 31, 0.08);
+  height: 100%;
 }
 </style>
