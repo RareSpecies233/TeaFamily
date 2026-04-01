@@ -64,3 +64,104 @@ npm install
 npm run dev      # 开发模式
 npm run build    # 生产构建
 ```
+
+## 部署（构建后二进制的运行方式）
+
+下面说明如何将构建脚本 `scripts/macOS_build_release.sh` 生成的 `dist` 目录部署到服务器或客户端，并以多种方式启动服务。
+
+### 准备
+- 将 `dist` 目录复制或上传到目标主机（示例路径 `/opt/teafamily`）。
+- 修改 `dist/config/*.json` 中的配置（如 `server_host`、`node_id`、端口等）以匹配你的环境。
+- 默认端口：
+      - TCP: `9527`
+      - HTTP: `9528`
+      - GreenTea 更新：`9529`
+      - UDP 基础端口：`9530`
+
+### 直接运行（调试 / 快速验证）
+在目标主机上进入 `dist` 目录并直接运行二进制（示例把日志重定向到 `logs/`）：
+
+```bash
+cd /opt/teafamily
+mkdir -p logs
+# 在服务器上运行 LemonTea（HTTP 服务）
+./bin/LemonTea > logs/lemontea.log 2>&1 &
+# 可选：运行 GreenTea 守护进程（监控/更新）
+./bin/GreenTea > logs/greentea.log 2>&1 &
+# 在每台客户端（例如 Raspberry Pi）上运行 HoneyTea
+./bin/HoneyTea > logs/honeytea.log 2>&1 &
+
+# 查看日志
+tail -f logs/lemontea.log
+```
+
+### 使用 systemd（Linux）
+创建服务单元（示例 `/etc/systemd/system/lemontea.service`）：
+
+```ini
+[Unit]
+Description=LemonTea Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/teafamily
+ExecStart=/bin/sh -c '/opt/teafamily/bin/LemonTea >> /var/log/teafamily/lemontea.log 2>&1'
+Restart=on-failure
+User=teafamily
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启用并查看日志：
+
+```bash
+sudo mkdir -p /var/log/teafamily
+sudo systemctl daemon-reload
+sudo systemctl enable --now lemontea.service
+sudo journalctl -u lemontea.service -f
+```
+
+### macOS launchd 示例
+在 macOS 上可以使用 `launchd`，示例 `~/Library/LaunchAgents/com.teafamily.lemontea.plist`：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+      <dict>
+            <key>Label</key><string>com.teafamily.lemontea</string>
+            <key>ProgramArguments</key>
+            <array>
+                  <string>/opt/teafamily/bin/LemonTea</string>
+            </array>
+            <key>WorkingDirectory</key><string>/opt/teafamily</string>
+            <key>RunAtLoad</key><true/>
+            <key>StandardOutPath</key><string>/var/log/teafamily/lemontea.log</string>
+            <key>StandardErrorPath</key><string>/var/log/teafamily/lemontea.err</string>
+      </dict>
+</plist>
+```
+
+### OrangeTea 前端部署（静态文件）
+`dist/frontend` 包含生产构建的静态文件，可使用任意静态文件服务器或 Nginx 提供服务。示例使用 `serve`：
+
+```bash
+npm install -g serve
+serve -s /opt/teafamily/frontend -l 8080
+# 访问: http://<your-host>:8080
+```
+
+### 常见问题（FAQ）
+
+- 树莓派部署（Raspberry Pi）
+      - 可以把 `HoneyTea` 部署在树莓派上，但需要为目标架构（arm/arm64/armv7）编译相应的二进制。推荐直接在树莓派上运行构建脚本，或使用交叉编译并将对应平台的二进制复制到树莓派。
+      - 插件系统仍然有效：只要插件可执行文件是为目标机器编译并部署到该机器，LemonTea/HoneyTea 会按原样管理它们。
+
+- 子进程 / 插件可以使用其它语言吗？
+      - 可以。`HoneyTea`/`LemonTea` 管理的是任意可执行文件，插件或子进程可以用 Python、Go、Rust、Shell 等语言实现。
+      - 如果插件与父进程通过 stdio 使用 JSON-line 协议通信，请确保插件实现了相应的 JSON-line 输入/输出（例如 Python 使用 `sys.stdin.readline()` 与 `print(json.dumps(...), flush=True)`）。
+      - 对于脚本语言，请确保目标机器安装相应运行时（如 `python3`），并且脚本具有可执行权限和正确的 shebang（如 `#!/usr/bin/env python3`）。
+
+如果需要，我可以把上面的 `systemd` 单元、`launchd` 示例和静态服务器示例写成可直接复制的文件。
