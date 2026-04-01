@@ -1,8 +1,34 @@
 <template>
   <div class="plugins-page">
     <header class="hero">
-      <h2>统一插件管理台</h2>
-      <p>插件包上传后将固定安装到 LemonTea、HoneyTea 与 OrangeTea 三端，不再区分分发策略。</p>
+      <div class="hero-left">
+        <h2>统一插件管理台</h2>
+        <p>插件包上传后将安装到 LemonTea、HoneyTea 与 OrangeTea 三端</p>
+      </div>
+
+      <div class="hero-actions">
+        <el-button size="small" @click="refreshAll" :disabled="refreshing">
+          <el-icon><Refresh /></el-icon>
+          刷新数据
+        </el-button>
+
+        <el-upload
+          :auto-upload="false"
+          :show-file-list="false"
+          accept=".tar.gz,.tgz"
+          :disabled="!connectionStore.connected || installing || previewLoading"
+          @change="handleSelectPackage"
+        >
+          <el-button
+            type="primary"
+            :loading="installing || previewLoading"
+            :disabled="!connectionStore.connected || installing || previewLoading"
+          >
+            <el-icon><Upload /></el-icon>
+            上传并预览
+          </el-button>
+        </el-upload>
+      </div>
     </header>
 
     <el-alert
@@ -13,38 +39,6 @@
       class="connect-alert"
     />
 
-    <el-card class="panel-card install-card">
-      <template #header>
-        <div class="panel-header">
-          <span>统一安装</span>
-          <el-button size="small" @click="refreshAll">
-            <el-icon><Refresh /></el-icon>
-            刷新数据
-          </el-button>
-        </div>
-      </template>
-
-      <p class="install-tip">
-        上传统一插件包（.tar.gz）后会先展示插件信息，确认后执行安装。
-      </p>
-
-      <el-upload
-        :auto-upload="false"
-        :show-file-list="false"
-        accept=".tar.gz,.tgz"
-        :disabled="!connectionStore.connected || installing || previewLoading"
-        @change="handleSelectPackage"
-      >
-        <el-button
-          type="primary"
-          :loading="installing || previewLoading"
-          :disabled="!connectionStore.connected || installing || previewLoading"
-        >
-          <el-icon><Upload /></el-icon>
-          上传并预览
-        </el-button>
-      </el-upload>
-    </el-card>
 
     <el-card class="panel-card">
       <template #header>
@@ -54,17 +48,17 @@
         </div>
       </template>
 
-      <el-table :data="pluginRows" stripe v-loading="loading" empty-text="暂无插件数据">
-        <el-table-column prop="name" label="插件" min-width="180" />
-        <el-table-column prop="version" label="版本" width="110" />
+      <el-table :data="pluginRows" stripe v-loading="loading" empty-text="暂无插件数据" size="small">
+        <el-table-column prop="name" label="插件" min-width="140" />
+          <el-table-column prop="version" label="版本" width="90" />
 
-        <el-table-column label="类型" width="130">
+          <el-table-column label="类型" width="100">
           <template #default="{ row }">
             <el-tag size="small" type="warning">{{ pluginTypeLabel(row.pluginType) }}</el-tag>
           </template>
         </el-table-column>
 
-        <el-table-column label="LemonTea" width="120">
+        <el-table-column label="LemonTea" width="100">
           <template #default="{ row }">
             <el-tag :type="localStateType(row.localState)" size="small">
               {{ row.localInstalled ? row.localState : '未安装' }}
@@ -72,7 +66,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="HoneyTea" width="130">
+        <el-table-column label="HoneyTea" width="100">
           <template #default="{ row }">
             <el-tag :type="remoteStateType(row.remoteState, row.remoteInstalled)" size="small">
               {{ remoteStateLabel(row) }}
@@ -80,51 +74,31 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="前端页面" width="130">
-          <template #default="{ row }">
-            <el-tag :type="row.frontendInstalled ? 'success' : 'info'" size="small">
-              {{ row.frontendInstalled ? '已安装' : '未安装' }}
-            </el-tag>
-          </template>
-        </el-table-column>
+        <!-- 已移除“前端页面”列；界面仅在操作按钮上保留“打开页面”入口 -->
 
-        <el-table-column label="操作" min-width="420">
+        <el-table-column label="操作" min-width="360">
           <template #default="{ row }">
             <div class="actions">
               <el-button
                 size="small"
-                type="success"
+                :type="row.localState === 'running' ? 'warning' : 'success'"
                 class="action-btn"
-                @click="startLocal(row.name)"
-                :disabled="!row.localInstalled || row.localState === 'running'"
+                @click="toggleLocal(row)"
+                :disabled="!row.localInstalled"
               >
-                启动服务端
+                {{ row.localState === 'running' ? '停止服务端' : '启动服务端' }}
               </el-button>
+
               <el-button
                 size="small"
-                type="warning"
+                :type="row.remoteState === 'running' ? 'warning' : 'success'"
                 class="action-btn"
-                @click="stopLocal(row.name)"
-                :disabled="!row.localInstalled || row.localState !== 'running'"
+                @click="toggleRemote(row)"
+                :disabled="!row.remoteInstalled || !row.remoteNodeId"
               >
-                停止服务端
+                {{ row.remoteState === 'running' ? '停止远端' : '启动远端' }}
               </el-button>
-              <el-button
-                size="small"
-                class="action-btn"
-                @click="startRemote(row)"
-                :disabled="!row.remoteInstalled || row.remoteState === 'running'"
-              >
-                启动远端
-              </el-button>
-              <el-button
-                size="small"
-                class="action-btn"
-                @click="stopRemote(row)"
-                :disabled="!row.remoteInstalled || row.remoteState !== 'running'"
-              >
-                停止远端
-              </el-button>
+
               <el-button
                 size="small"
                 class="action-btn"
@@ -133,6 +107,7 @@
               >
                 打开页面
               </el-button>
+
               <el-button size="small" type="danger" class="action-btn" @click="deleteUnified(row)">
                 统一删除
               </el-button>
@@ -378,6 +353,23 @@ async function stopLocal(name: string) {
   }
 }
 
+async function toggleLocal(row: UnifiedPluginRow) {
+  if (!row.localInstalled) return
+  if (row.localState === 'running') {
+    try {
+      await stopLocal(row.name)
+    } catch {
+      ElMessage.error('停止失败')
+    }
+  } else {
+    try {
+      await startLocal(row.name)
+    } catch {
+      ElMessage.error('启动失败')
+    }
+  }
+}
+
 async function startRemote(row: UnifiedPluginRow) {
   if (!row.remoteInstalled || !row.remoteNodeId) return
   try {
@@ -397,6 +389,23 @@ async function stopRemote(row: UnifiedPluginRow) {
     await refreshAll()
   } catch {
     ElMessage.error('远端停止失败')
+  }
+}
+
+async function toggleRemote(row: UnifiedPluginRow) {
+  if (!row.remoteInstalled || !row.remoteNodeId) return
+  if (row.remoteState === 'running') {
+    try {
+      await stopRemote(row)
+    } catch {
+      ElMessage.error('远端停止失败')
+    }
+  } else {
+    try {
+      await startRemote(row)
+    } catch {
+      ElMessage.error('远端启动失败')
+    }
   }
 }
 
@@ -526,7 +535,11 @@ onMounted(refreshAll)
   min-height: calc(100vh - 40px);
 }
 
+
 .hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   background:
     radial-gradient(circle at 12% 20%, rgba(255, 239, 190, 0.9), transparent 40%),
     linear-gradient(135deg, #fff5df 0%, #ffefdc 40%, #ecfffb 100%);
@@ -534,6 +547,16 @@ onMounted(refreshAll)
   border-radius: 18px;
   padding: 18px 20px;
   margin-bottom: 16px;
+}
+
+.hero-left {
+  max-width: calc(100% - 260px);
+}
+
+.hero-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .hero h2 {
@@ -576,13 +599,22 @@ onMounted(refreshAll)
 }
 
 .actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(118px, 1fr));
+  display: flex;
+  flex-wrap: nowrap;
   gap: 6px;
+  align-items: center;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .action-btn {
-  width: 100%;
+  flex: 0 0 auto;
+  min-width: 88px;
+  max-width: 160px;
+  padding: 6px 10px;
+  font-size: 13px;
+  white-space: nowrap;
   justify-content: center;
+  box-sizing: border-box;
 }
 </style>
