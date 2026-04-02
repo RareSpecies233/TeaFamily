@@ -1,8 +1,6 @@
 <template>
   <div class="plugin-detail-page">
     <div class="page-header">
-      <div class="header-spacer" aria-hidden="true"></div>
-
       <div class="title-wrap">
         <h2>{{ formattedTitle }}</h2>
       </div>
@@ -169,7 +167,7 @@ onMounted(loadPluginFrontend)
 
 .plugin-detail-page .page-header {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 14px;
   padding: 14px 16px;
@@ -182,8 +180,9 @@ onMounted(loadPluginFrontend)
 }
 
 .title-wrap {
-  text-align: center;
+  text-align: left;
   min-width: 0;
+  justify-self: start;
 }
 
 .plugin-detail-page h2 {
@@ -233,11 +232,6 @@ onMounted(loadPluginFrontend)
   gap: 10px;
 }
 
-.header-spacer {
-  min-width: 102px;
-  height: 36px;
-  flex-shrink: 0;
-}
 
 @media (max-width: 768px) {
   .plugin-detail-page .page-header {
@@ -251,10 +245,6 @@ onMounted(loadPluginFrontend)
   }
 
   .header-btn {
-    min-width: 0;
-  }
-
-  .header-spacer {
     min-width: 0;
   }
 }
