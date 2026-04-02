@@ -124,6 +124,23 @@ void LemonTea::onClientMessage(tea::TcpConnection::Ptr conn, const tea::Message&
             conn->setUserData("node_id", node_id);
             conn->setUserData("role", role);
 
+            // Keep a single active connection per node_id to avoid routing commands
+            // (such as remote plugin install) to stale duplicate sockets.
+            std::vector<tea::TcpConnection::Ptr> stale_connections;
+            for (const auto& c : tcp_server_->connections()) {
+                if (!c || c->fd() == conn->fd()) {
+                    continue;
+                }
+                if (c->getUserData("node_id") == node_id) {
+                    stale_connections.push_back(c);
+                }
+            }
+            for (const auto& stale : stale_connections) {
+                spdlog::warn("Duplicate connection for node {} detected, closing stale {}:{}",
+                             node_id, stale->peerAddr(), stale->peerPort());
+                stale->stop();
+            }
+
             {
                 std::lock_guard<std::mutex> lock(clients_mutex_);
                 ClientInfo ci;
@@ -186,6 +203,7 @@ void LemonTea::onClientMessage(tea::TcpConnection::Ptr conn, const tea::Message&
         }
 
         case tea::MsgType::PLUGIN_INSTALL_ACK: {
+            std::string node_id = conn->getUserData("node_id");
             std::string name = msg.payload.value("name", "");
             if (msg.payload.contains("ready") && msg.payload.value("ready", false) &&
                 !msg.payload.contains("success")) {
@@ -194,8 +212,26 @@ void LemonTea::onClientMessage(tea::TcpConnection::Ptr conn, const tea::Message&
             }
 
             bool success = msg.payload.value("success", false);
+            std::string error = msg.payload.value("error", std::string(""));
+
+            {
+                std::lock_guard<std::mutex> lock(remote_install_mutex_);
+                auto key = remoteInstallKey(node_id, name);
+                remote_install_results_[key] = RemoteInstallResult{
+                    true,
+                    success,
+                    error
+                };
+            }
+            remote_install_cv_.notify_all();
+
             spdlog::info("Plugin {} install: {}", name, success ? "ok" : "failed");
             conn->send(tea::Message::makePluginListReq());
+            break;
+        }
+
+        case tea::MsgType::FILE_TRANSFER_ACK: {
+            // Optional flow-control ACK, currently not required for command handling.
             break;
         }
 
@@ -240,12 +276,26 @@ void LemonTea::onClientDisconnect(tea::TcpConnection::Ptr conn) {
     auto it = fd_to_node_.find(conn->fd());
     if (it != fd_to_node_.end()) {
         std::string node_id = it->second;
+        fd_to_node_.erase(it);
+
+        bool still_connected = false;
+        for (const auto& [fd, mapped_node] : fd_to_node_) {
+            if (mapped_node == node_id) {
+                still_connected = true;
+                break;
+            }
+        }
+
         auto cit = clients_.find(node_id);
         if (cit != clients_.end()) {
-            cit->second.connected = false;
+            cit->second.connected = still_connected;
         }
-        fd_to_node_.erase(it);
-        spdlog::info("Client disconnected: {}", node_id);
+
+        if (still_connected) {
+            spdlog::warn("Client {} disconnected on one socket, but another socket is still active", node_id);
+        } else {
+            spdlog::info("Client disconnected: {}", node_id);
+        }
     }
 }
 
@@ -352,6 +402,11 @@ bool LemonTea::installRemotePlugin(const std::string& node_id, const std::string
     auto conn = tcp_server_->getConnection(node_id);
     if (!conn) return false;
 
+    {
+        std::lock_guard<std::mutex> lock(remote_install_mutex_);
+        remote_install_results_.erase(remoteInstallKey(node_id, name));
+    }
+
     // Send install command
     conn->send({tea::MsgType::PLUGIN_INSTALL, {{"name", name}}});
 
@@ -369,7 +424,37 @@ bool LemonTea::installRemotePlugin(const std::string& node_id, const std::string
     }
 
     conn->send(tea::Message::makeFileTransferEnd(transfer_id));
-    return true;
+
+    const auto key = remoteInstallKey(node_id, name);
+    std::unique_lock<std::mutex> lock(remote_install_mutex_);
+    const auto got_ack = remote_install_cv_.wait_for(
+        lock,
+        std::chrono::milliseconds(8000),
+        [&]() {
+            auto it = remote_install_results_.find(key);
+            return it != remote_install_results_.end() && it->second.ready;
+        });
+
+    if (!got_ack) {
+        spdlog::warn("Remote plugin install timeout: node={}, plugin={}", node_id, name);
+        return false;
+    }
+
+    auto it = remote_install_results_.find(key);
+    if (it == remote_install_results_.end()) {
+        return false;
+    }
+
+    const bool success = it->second.success;
+    const std::string error = it->second.error;
+    remote_install_results_.erase(it);
+
+    if (!success) {
+        spdlog::warn("Remote plugin install failed: node={}, plugin={}, error={}",
+                     node_id, name, error.empty() ? "unknown" : error);
+    }
+
+    return success;
 }
 
 std::vector<LemonTea::ClientInfo> LemonTea::getClients() const {

@@ -93,12 +93,22 @@ std::vector<TcpConnection::Ptr> TcpServer::connections() const {
 
 TcpConnection::Ptr TcpServer::getConnection(const std::string& peer_id) const {
     std::lock_guard<std::mutex> lock(conns_mutex_);
+    TcpConnection::Ptr best;
+    int best_fd = -1;
     for (const auto& [fd, conn] : connections_) {
-        if (conn->getUserData("node_id") == peer_id) {
-            return conn;
+        if (!conn->isConnected()) {
+            continue;
+        }
+        if (conn->getUserData("node_id") != peer_id) {
+            continue;
+        }
+        // Pick the latest socket fd to avoid routing to stale duplicate connections.
+        if (fd > best_fd) {
+            best_fd = fd;
+            best = conn;
         }
     }
-    return nullptr;
+    return best;
 }
 
 void TcpServer::acceptLoop() {

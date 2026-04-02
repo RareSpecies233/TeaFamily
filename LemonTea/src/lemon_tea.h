@@ -80,6 +80,16 @@ public:
     const std::string& frontendPluginsDir() const { return frontend_plugins_dir_; }
 
 private:
+    struct RemoteInstallResult {
+        bool ready = false;
+        bool success = false;
+        std::string error;
+    };
+
+    static std::string remoteInstallKey(const std::string& node_id, const std::string& plugin_name) {
+        return node_id + "|" + plugin_name;
+    }
+
     void onClientConnect(tea::TcpConnection::Ptr conn);
     void onClientMessage(tea::TcpConnection::Ptr conn, const tea::Message& msg);
     void onClientDisconnect(tea::TcpConnection::Ptr conn);
@@ -118,6 +128,11 @@ private:
     mutable std::mutex clients_mutex_;
     std::map<std::string, ClientInfo> clients_;  // node_id -> info
     std::map<int, std::string> fd_to_node_;      // fd -> node_id
+
+    // Remote install ACK tracking: keyed by "node_id|plugin_name".
+    mutable std::mutex remote_install_mutex_;
+    std::condition_variable remote_install_cv_;
+    std::map<std::string, RemoteInstallResult> remote_install_results_;
 
     // Plugin event queue
     mutable std::mutex plugin_events_mutex_;
