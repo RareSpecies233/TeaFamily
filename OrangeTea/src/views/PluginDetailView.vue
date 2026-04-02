@@ -1,10 +1,7 @@
 <template>
   <div class="plugin-detail-page">
     <div class="page-header">
-      <el-button class="header-btn" @click="handleBack" size="small">
-        <el-icon><ArrowLeft /></el-icon>
-        {{ standaloneMode ? '关闭窗口' : '返回' }}
-      </el-button>
+      <div class="header-spacer" aria-hidden="true"></div>
 
       <div class="title-wrap">
         <h2>{{ formattedTitle }}</h2>
@@ -236,6 +233,12 @@ onMounted(loadPluginFrontend)
   gap: 10px;
 }
 
+.header-spacer {
+  min-width: 102px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
 @media (max-width: 768px) {
   .plugin-detail-page .page-header {
     grid-template-columns: 1fr 1fr;
@@ -248,6 +251,10 @@ onMounted(loadPluginFrontend)
   }
 
   .header-btn {
+    min-width: 0;
+  }
+
+  .header-spacer {
     min-width: 0;
   }
 }
