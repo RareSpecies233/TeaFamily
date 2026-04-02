@@ -1,9 +1,9 @@
 <template>
   <div class="plugin-detail-page">
     <div class="page-header">
-      <el-button class="header-btn" @click="router.back()" size="small">
+      <el-button class="header-btn" @click="handleBack" size="small">
         <el-icon><ArrowLeft /></el-icon>
-        返回
+        {{ standaloneMode ? '关闭窗口' : '返回' }}
       </el-button>
 
       <div class="title-wrap">
@@ -70,6 +70,15 @@ const error = ref('')
 const errorHint = ref('')
 const loaderKey = computed(() => `${pluginName.value}:${pluginUrl.value}:${pluginApiBase.value}`)
 const formattedTitle = computed(() => `（${navName.value || pluginName.value}）${pluginName.value}`)
+const standaloneMode = computed(() => route.name === 'plugin-window' || route.meta.standalone === true)
+
+function handleBack() {
+  if (standaloneMode.value && window.opener) {
+    window.close()
+    return
+  }
+  router.back()
+}
 
 function buildPluginUrl(name: string, entry: string) {
   const base = (connectionStore.serverUrl || '').replace(/\/+$/, '')

@@ -15,7 +15,7 @@
         <el-upload
           :auto-upload="false"
           :show-file-list="false"
-          accept=".tar.gz,.tgz"
+          accept=".tar.gz,.tgz,application/gzip,application/x-gzip"
           :disabled="!connectionStore.connected || installing || previewLoading"
           @change="handleSelectPackage"
         >
@@ -469,6 +469,15 @@ async function deleteUnified(row: UnifiedPluginRow) {
 async function handleSelectPackage(uploadFile: UploadFile) {
   if (!uploadFile.raw) return
 
+  const fileName = (uploadFile.raw.name || uploadFile.name || '').toLowerCase()
+  const isTarGz = fileName.endsWith('.tar.gz') || fileName.endsWith('.tgz')
+  if (!isTarGz) {
+    selectedPackage.value = null
+    previewInfo.value = null
+    ElMessage.error('仅支持上传 .tar.gz 或 .tgz 插件包')
+    return
+  }
+
   previewLoading.value = true
   try {
     selectedPackage.value = uploadFile.raw
@@ -520,7 +529,21 @@ async function confirmInstall() {
 }
 
 function openPlugin(name: string) {
-  router.push(`/plugin/${name}`)
+  const multiWindowMode = localStorage.getItem('tea_plugin_multi_window') === '1'
+
+  if (multiWindowMode) {
+    const to = router.resolve({
+      name: 'plugin-window',
+      params: { name },
+    })
+    window.open(to.href, '_blank', 'noopener,noreferrer')
+    return
+  }
+
+  router.push({
+    name: 'plugin-detail',
+    params: { name },
+  })
 }
 
 watch(

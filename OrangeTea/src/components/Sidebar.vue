@@ -20,19 +20,19 @@
     </div>
 
     <el-menu
-      :default-active="route.path"
-      router
+      :default-active="activeMenuIndex"
+      @select="handleMenuSelect"
       class="sidebar-menu"
       background-color="transparent"
       text-color="#6f6a5e"
       active-text-color="#1b1407"
     >
-      <el-menu-item index="/plugins" class="static-menu-item">
+      <el-menu-item index="plugins" class="static-menu-item">
         <el-icon><Box /></el-icon>
         <span v-if="!collapsed">插件管理</span>
       </el-menu-item>
 
-      <el-menu-item index="/update" class="static-menu-item">
+      <el-menu-item index="update" class="static-menu-item">
         <el-icon><Upload /></el-icon>
         <span v-if="!collapsed">版本更新</span>
       </el-menu-item>
@@ -40,29 +40,58 @@
       <el-menu-item
         v-for="plugin in pluginPageEntries"
         :key="plugin.name"
-        :index="`/plugin/${plugin.name}`"
+        :index="`plugin:${plugin.name}`"
         class="dynamic-menu-item"
       >
-        <el-icon><Grid /></el-icon>
-        <span :class="{ 'plugin-mini-text': collapsed }">
+        <el-icon v-if="!collapsed"><Grid /></el-icon>
+        <span class="dynamic-menu-label" :class="{ 'plugin-mini-text': collapsed }">
           {{ collapsed ? shortPluginLabel(plugin.title || plugin.name) : plugin.title || plugin.name }}
         </span>
       </el-menu-item>
 
       <el-menu-item
         v-if="!pluginPageEntries.length"
-        index="/plugins"
+        index="plugin:__empty"
         disabled
         class="dynamic-menu-item"
       >
-        <el-icon><Grid /></el-icon>
-        <span :class="{ 'plugin-mini-text': collapsed }">
+        <el-icon v-if="!collapsed"><Grid /></el-icon>
+        <span class="dynamic-menu-label" :class="{ 'plugin-mini-text': collapsed }">
           {{ collapsed ? '暂无' : '暂无可用页面（请先安装）' }}
         </span>
       </el-menu-item>
     </el-menu>
 
     <div class="sidebar-footer">
+      <div class="window-mode">
+        <el-tooltip
+          v-if="collapsed"
+          :content="`多窗口模式：${multiWindowMode ? '已开启' : '已关闭'}`"
+          placement="right"
+        >
+          <el-switch
+            v-model="multiWindowMode"
+            size="small"
+            inline-prompt
+            active-text="开"
+            inactive-text="关"
+          />
+        </el-tooltip>
+
+        <template v-else>
+          <div class="window-mode-row">
+            <span class="window-mode-label">多窗口模式</span>
+            <el-switch
+              v-model="multiWindowMode"
+              inline-prompt
+              active-text="开"
+              inactive-text="关"
+            />
+          </div>
+          <p class="window-mode-hint">开启后插件界面会在新窗口打开（无导航栏）</p>
+        </template>
+      </div>
+
       <el-tooltip
         v-if="collapsed"
         :content="`LemonTea：${statusLabel}（点击配置）`"
@@ -140,20 +169,34 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useConnectionStore } from '@/stores/connection'
 import { usePluginStore } from '@/stores/plugins'
 
 const route = useRoute()
+const router = useRouter()
 const connectionStore = useConnectionStore()
 const pluginStore = usePluginStore()
 const collapsed = ref(localStorage.getItem('tea_sidebar_collapsed') === '1')
+const multiWindowMode = ref(localStorage.getItem('tea_plugin_multi_window') === '1')
 const configVisible = ref(false)
 const serverAddress = ref(connectionStore.serverUrl || 'http://127.0.0.1:9528')
 
 const statusType = computed(() => (connectionStore.connected ? 'success' : 'info'))
 const statusLabel = computed(() => (connectionStore.connected ? '在线' : '离线'))
 const displayServerUrl = computed(() => connectionStore.serverUrl || '未设置服务器地址')
+const activeMenuIndex = computed(() => {
+  if (route.path === '/plugins') return 'plugins'
+  if (route.path === '/update') return 'update'
+
+  const pluginMatch = route.path.match(/^\/plugin\/(.+)$/)
+  if (pluginMatch?.[1]) {
+    return `plugin:${decodeURIComponent(pluginMatch[1])}`
+  }
+
+  return ''
+})
+
 const pluginPageEntries = computed(() => {
   const entries = new Map<string, { name: string; title: string }>()
 
@@ -209,8 +252,44 @@ watch(collapsed, (value) => {
   localStorage.setItem('tea_sidebar_collapsed', value ? '1' : '0')
 })
 
+watch(multiWindowMode, (value) => {
+  localStorage.setItem('tea_plugin_multi_window', value ? '1' : '0')
+})
+
 function toggleCollapsed() {
   collapsed.value = !collapsed.value
+}
+
+function openPluginPage(name: string) {
+  if (!name || name === '__empty') return
+
+  if (multiWindowMode.value) {
+    const to = router.resolve({
+      name: 'plugin-window',
+      params: { name },
+    })
+    window.open(to.href, '_blank', 'noopener,noreferrer')
+    return
+  }
+
+  router.push({
+    name: 'plugin-detail',
+    params: { name },
+  })
+}
+
+function handleMenuSelect(index: string) {
+  if (index === 'plugins') {
+    router.push('/plugins')
+    return
+  }
+  if (index === 'update') {
+    router.push('/update')
+    return
+  }
+  if (index.startsWith('plugin:')) {
+    openPluginPage(index.slice('plugin:'.length))
+  }
 }
 
 function handleDisconnect() {
@@ -240,10 +319,10 @@ function shortPluginLabel(value: string) {
   const text = value.trim()
   if (!text) return '--'
   const chineseChars = text.match(/[\u4e00-\u9fff]/g)
-  if (chineseChars && chineseChars.length >= 2) {
+  if (chineseChars && chineseChars.length > 0) {
     return chineseChars.slice(0, 2).join('')
   }
-  return text.slice(0, 2)
+  return Array.from(text).slice(0, 2).join('')
 }
 </script>
 
@@ -362,8 +441,17 @@ function shortPluginLabel(value: string) {
 }
 
 .plugin-mini-text {
+  display: block;
+  width: 100%;
+  text-align: center;
   letter-spacing: 0.6px;
   font-weight: 700;
+}
+
+.dynamic-menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar.collapsed :deep(.static-menu-item) {
@@ -376,7 +464,9 @@ function shortPluginLabel(value: string) {
 }
 
 .sidebar.collapsed :deep(.dynamic-menu-item) {
-  padding-left: 14px !important;
+  justify-content: center;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
 }
 
 .sidebar-footer {
@@ -386,8 +476,46 @@ function shortPluginLabel(value: string) {
 
 .sidebar.collapsed .sidebar-footer {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   padding: 10px 8px 14px;
+}
+
+.window-mode {
+  margin-bottom: 10px;
+  border: 1px solid #dfcfb3;
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: rgba(255, 252, 245, 0.78);
+}
+
+.sidebar.collapsed .window-mode {
+  margin: 0;
+  padding: 7px 8px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.window-mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.window-mode-label {
+  font-size: 12px;
+  color: #7a6645;
+  font-weight: 600;
+}
+
+.window-mode-hint {
+  margin-top: 6px;
+  color: #8b7858;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .connection-card {

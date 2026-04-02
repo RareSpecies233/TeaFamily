@@ -23,6 +23,16 @@ const router = createRouter({
       component: () => import('@/views/PluginDetailView.vue'),
       props: true,
     },
+    {
+      path: '/plugin-window/:name',
+      name: 'plugin-window',
+      component: () => import('@/views/PluginDetailView.vue'),
+      props: true,
+      meta: {
+        hideSidebar: true,
+        standalone: true,
+      },
+    },
   ],
 })
 

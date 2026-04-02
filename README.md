@@ -37,6 +37,21 @@ TeaFamily 是一套分布式进程管理系统，包含以下组件：
 ./scripts/macOS_build_release.sh clean # 清理构建
 ```
 
+### 跨平台目标构建（Linux x64 / Raspberry Pi 5）
+```bash
+./scripts/build_linux_x64_and_rpi5.sh
+./scripts/build_linux_x64_and_rpi5.sh clean
+```
+
+默认会输出：
+- `dist/cross-targets/linux-x64`（GreenTea + LemonTea）
+- `dist/cross-targets/rpi5`（GreenTea + HoneyTea）
+
+可选环境变量：
+- `LINUX_X64_CC` / `LINUX_X64_CXX` / `LINUX_X64_SYSROOT`
+- `RPI5_CC` / `RPI5_CXX` / `RPI5_SYSROOT`
+- `BUILD_ROOT` / `DIST_ROOT`
+
 更多脚本说明见 [macOS 构建脚本说明](docs/macOS_build_release.md)
 
 ### 手动构建
@@ -72,6 +87,13 @@ macOS 插件导出脚本：
 ./scripts/macOS_export_ssh_plugin.sh
 ./scripts/macOS_export_file_manager_plugin.sh
 ./scripts/macOS_export_monitor_plugin.sh
+```
+
+跨目标插件导出脚本（LemonTea: Linux x64 / HoneyTea: Raspberry Pi 5）：
+```bash
+./scripts/export_ssh_plugin_linux_x64_lemon_rpi5_honey.sh
+./scripts/export_file_manager_plugin_linux_x64_lemon_rpi5_honey.sh
+./scripts/export_monitor_plugin_linux_x64_lemon_rpi5_honey.sh
 ```
 
 脚本会导出统一安装包（例如 `ssh-unified-macos.tar.gz`），用于 OrangeTea 的统一插件安装入口。
