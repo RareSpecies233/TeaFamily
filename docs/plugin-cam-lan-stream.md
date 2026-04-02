@@ -45,9 +45,24 @@
 - `TEA_CAM_STREAM_PORT`：插件 HTTP 监听端口（默认 `19731`）
 - `TEA_CAM_STREAM_BIND_HOST`：监听地址（默认 `0.0.0.0`）
 - `TEA_CAM_STREAM_PUBLIC_HOST`：对外展示地址（默认 `127.0.0.1`）
+- `TEA_CAM_STREAM_PUBLIC_ORIGIN`：完整对外地址，例如 `https://tea-lan.example.com:19731`，优先级最高
+- `TEA_CAM_STREAM_SSL_CERT`：启用 HTTPS 时使用的证书文件路径
+- `TEA_CAM_STREAM_SSL_KEY`：启用 HTTPS 时使用的私钥文件路径
+
+## 移动端实时串流
+移动浏览器调用摄像头时，必须处于安全上下文。推荐两种方式：
+- 使用 HTTPS 直接访问插件页面，并提供受信任的证书文件。
+- 通过本机/局域网反向代理提供 HTTPS，再把 `TEA_CAM_STREAM_PUBLIC_ORIGIN` 指向外部 HTTPS 地址。
+
+如果暂时没有可用证书，插件会自动退回兼容模式，允许用户通过“拍照并上传”方式更新画面，但这不是实时串流。
+
+### 一个可行的本地方案
+1. 使用 `mkcert` 或企业证书为局域网地址生成受信任证书。
+2. 将证书路径传给 `TEA_CAM_STREAM_SSL_CERT` 和 `TEA_CAM_STREAM_SSL_KEY`。
+3. 用手机打开 `https://.../` 的移动端页面，允许摄像头权限后即可实时串流。
 
 ## 插件 HTTP 接口（插件内置服务）
-- `GET /`：移动端采集页
+- `GET /`：移动端采集页（HTTP 或 HTTPS，取决于是否配置证书）
 - `GET /api/devices`：设备与摄像头快照
 - `POST /api/register`：设备注册/更新
 - `POST /api/publish-frame`：上传 JPEG 帧

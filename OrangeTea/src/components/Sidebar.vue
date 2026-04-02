@@ -22,8 +22,6 @@
     <el-menu
       :default-active="activeMenuIndex"
       @select="handleMenuSelect"
-      @mousedown="handleMenuMouseDown"
-      @auxclick="handleMenuAuxClick"
       class="sidebar-menu"
       background-color="transparent"
       text-color="#6f6a5e"
@@ -46,10 +44,16 @@
         :data-plugin-name="plugin.name"
         class="dynamic-menu-item"
       >
-        <el-icon v-if="!collapsed"><Grid /></el-icon>
-        <span class="dynamic-menu-label" :class="{ 'plugin-mini-text': collapsed }">
-          {{ collapsed ? shortPluginLabel(plugin.title || plugin.name) : plugin.title || plugin.name }}
-        </span>
+        <a
+          class="plugin-link"
+          :href="pluginLinkHref(plugin.name)"
+          @click.stop.prevent="handlePluginLinkClick(plugin.name, $event)"
+        >
+          <el-icon v-if="!collapsed"><Grid /></el-icon>
+          <span class="dynamic-menu-label" :class="{ 'plugin-mini-text': collapsed }">
+            {{ collapsed ? shortPluginLabel(plugin.title || plugin.name) : plugin.title || plugin.name }}
+          </span>
+        </a>
       </el-menu-item>
 
       <el-menu-item
@@ -263,7 +267,10 @@ function toggleCollapsed() {
   collapsed.value = !collapsed.value
 }
 
-function openPluginPage(name: string, options: { forceStandalone?: boolean } = {}) {
+function openPluginPage(
+  name: string,
+  options: { forceStandalone?: boolean } = {}
+) {
   if (!name || name === '__empty') return
 
   if (multiWindowMode.value || options.forceStandalone) {
@@ -271,7 +278,7 @@ function openPluginPage(name: string, options: { forceStandalone?: boolean } = {
       name: 'plugin-window',
       params: { name },
     })
-    window.open(to.href, '_blank', 'noopener,noreferrer')
+    window.open(to.href, '_blank')
     return
   }
 
@@ -290,38 +297,25 @@ function handleMenuSelect(index: string) {
     router.push('/update')
     return
   }
-  if (index.startsWith('plugin:')) {
-    openPluginPage(index.slice('plugin:'.length))
-  }
 }
 
-function pluginNameFromMouseEvent(event: MouseEvent) {
-  const target = event.target
-  if (!(target instanceof Element)) {
-    return ''
+function pluginLinkHref(name: string) {
+  if (multiWindowMode.value) {
+    return router.resolve({
+      name: 'plugin-window',
+      params: { name },
+    }).href
   }
-  const menuItem = target.closest('.el-menu-item[data-plugin-name]')
-  if (!(menuItem instanceof HTMLElement)) {
-    return ''
-  }
-  return menuItem.dataset.pluginName || ''
+
+  return router.resolve({
+    name: 'plugin-detail',
+    params: { name },
+  }).href
 }
 
-function handleMenuMouseDown(event: MouseEvent) {
-  if (event.button !== 1) return
-  const pluginName = pluginNameFromMouseEvent(event)
-  if (!pluginName) return
-  event.preventDefault()
-  event.stopPropagation()
-  openPluginPage(pluginName, { forceStandalone: true })
-}
-
-function handleMenuAuxClick(event: MouseEvent) {
-  if (event.button !== 1) return
-  const pluginName = pluginNameFromMouseEvent(event)
-  if (!pluginName) return
-  event.preventDefault()
-  event.stopPropagation()
+function handlePluginLinkClick(name: string, event: MouseEvent) {
+  if (event.button !== 0) return
+  openPluginPage(name)
 }
 
 function handleDisconnect() {
@@ -470,6 +464,24 @@ function shortPluginLabel(value: string) {
 
 :deep(.dynamic-menu-item) {
   justify-content: flex-start;
+}
+
+.plugin-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.sidebar.collapsed .plugin-link {
+  justify-content: center;
+}
+
+.plugin-link .el-icon {
+  margin-right: 0;
 }
 
 .plugin-mini-text {

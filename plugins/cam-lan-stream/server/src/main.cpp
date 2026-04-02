@@ -12,7 +12,9 @@
 #include <chrono>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -20,6 +22,7 @@
 #include <vector>
 
 using json = nlohmann::json;
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -43,20 +46,39 @@ std::mutex g_out_mutex;
 std::mutex g_data_mutex;
 std::unordered_map<std::string, DeviceState> g_devices;
 
-httplib::Server g_http_server;
+std::unique_ptr<httplib::Server> g_http_server;
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+std::unique_ptr<httplib::SSLServer> g_https_server;
+#endif
 std::thread g_http_thread;
 std::atomic<bool> g_running{true};
 
 std::string g_bind_host = "0.0.0.0";
 std::string g_public_host = "127.0.0.1";
 std::string g_public_origin;
+std::string g_https_cert_path;
+std::string g_https_key_path;
 int g_listen_port = 19731;
+bool g_use_https = false;
+
+std::string effectiveScheme() {
+  return g_use_https ? "https" : "http";
+}
 
 std::string effectivePublicOrigin() {
   if (!g_public_origin.empty()) {
     return g_public_origin;
   }
-  return "http://" + g_public_host + ":" + std::to_string(g_listen_port);
+  return effectiveScheme() + "://" + g_public_host + ":" + std::to_string(g_listen_port);
+}
+
+httplib::Server* activeServer() {
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+  if (g_use_https && g_https_server) {
+    return g_https_server.get();
+  }
+#endif
+  return g_http_server.get();
 }
 
 uint64_t nowMs() {
@@ -577,8 +599,8 @@ std::string buildMobilePageHtml() {
 </html>)HTML";
 }
 
-void configureHttpRoutes() {
-    g_http_server.set_pre_routing_handler([](const httplib::Request& req, httplib::Response& res) {
+void configureHttpRoutes(httplib::Server& server) {
+  server.set_pre_routing_handler([](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
@@ -589,15 +611,15 @@ void configureHttpRoutes() {
         return httplib::Server::HandlerResponse::Unhandled;
     });
 
-    g_http_server.Get("/", [](const httplib::Request&, httplib::Response& res) {
+    server.Get("/", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(buildMobilePageHtml(), "text/html; charset=utf-8");
     });
 
-    g_http_server.Get("/api/devices", [](const httplib::Request&, httplib::Response& res) {
+    server.Get("/api/devices", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(json{{"devices", snapshotDevices()}}.dump(), "application/json");
     });
 
-    g_http_server.Post("/api/register", [](const httplib::Request& req, httplib::Response& res) {
+    server.Post("/api/register", [](const httplib::Request& req, httplib::Response& res) {
         try {
             auto body = json::parse(req.body);
             const std::string raw_device_id = body.value("device_id", std::string());
@@ -634,7 +656,7 @@ void configureHttpRoutes() {
         }
     });
 
-    g_http_server.Post("/api/publish-frame", [](const httplib::Request& req, httplib::Response& res) {
+    server.Post("/api/publish-frame", [](const httplib::Request& req, httplib::Response& res) {
         try {
             auto body = json::parse(req.body);
             const std::string device_id = normalizeId(body.value("device_id", std::string()), "unknown-device");
@@ -674,7 +696,7 @@ void configureHttpRoutes() {
         }
     });
 
-    g_http_server.Get(R"(/api/frame/([^/]+)/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
+    server.Get(R"(/api/frame/([^/]+)/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
         const std::string device_id = normalizeId(req.matches[1].str(), std::string());
         const std::string camera_id = normalizeId(req.matches[2].str(), std::string());
 
@@ -702,14 +724,21 @@ void configureHttpRoutes() {
         res.set_content(reinterpret_cast<const char*>(frame.data()), static_cast<size_t>(frame.size()), "image/jpeg");
     });
 
-    g_http_server.Get("/healthz", [](const httplib::Request&, httplib::Response& res) {
+    server.Get("/healthz", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(json{{"ok", true}, {"plugin", "cam-lan-stream"}}.dump(), "application/json");
     });
 }
 
 void stopHttpServer() {
     g_running.store(false);
-    g_http_server.stop();
+  #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+    if (g_https_server) {
+      g_https_server->stop();
+    }
+  #endif
+    if (g_http_server) {
+      g_http_server->stop();
+    }
     if (g_http_thread.joinable()) {
         g_http_thread.join();
     }
@@ -765,16 +794,50 @@ int main() {
       }
     }
 
-    configureHttpRoutes();
+  #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+    const char* cert_path = std::getenv("TEA_CAM_STREAM_SSL_CERT");
+    const char* key_path = std::getenv("TEA_CAM_STREAM_SSL_KEY");
+    if (cert_path && *cert_path && key_path && *key_path) {
+      if (fs::exists(cert_path) && fs::exists(key_path)) {
+        g_https_server = std::make_unique<httplib::SSLServer>(cert_path, key_path);
+        if (g_https_server && g_https_server->is_valid()) {
+          g_use_https = true;
+          spdlog::info("cam-lan-stream HTTPS enabled using cert={} key={}", cert_path, key_path);
+        } else {
+          g_https_server.reset();
+          spdlog::warn("Failed to initialize HTTPS server, falling back to HTTP");
+        }
+      } else {
+        spdlog::warn("HTTPS cert/key path missing, falling back to HTTP");
+      }
+    }
+  #else
+    if (std::getenv("TEA_CAM_STREAM_SSL_CERT") || std::getenv("TEA_CAM_STREAM_SSL_KEY")) {
+      spdlog::warn("HTTPS requested but this build does not include OpenSSL support; using HTTP");
+    }
+  #endif
 
-    g_http_thread = std::thread([]() {
-        spdlog::info("cam-lan-stream http server listening on {}:{}", g_bind_host, g_listen_port);
-        if (!g_http_server.listen(g_bind_host.c_str(), g_listen_port)) {
+    if (!g_use_https) {
+      g_http_server = std::make_unique<httplib::Server>();
+    }
+
+    auto* server = activeServer();
+    if (!server) {
+      spdlog::error("No HTTP server instance available");
+      return 1;
+    }
+
+    configureHttpRoutes(*server);
+
+    const bool use_https = g_use_https;
+    g_http_thread = std::thread([server, use_https]() {
+      spdlog::info("cam-lan-stream {} server listening on {}:{}", use_https ? "https" : "http", g_bind_host, g_listen_port);
+      if (!server->listen(g_bind_host.c_str(), g_listen_port)) {
             if (g_running.load()) {
                 sendMessage({
                     {"action", "error"},
                     {"plugin", "cam-lan-stream"},
-                    {"message", "failed to listen http server on " + g_bind_host + ":" + std::to_string(g_listen_port)}
+            {"message", std::string("failed to listen ") + (use_https ? "https" : "http") + " server on " + g_bind_host + ":" + std::to_string(g_listen_port)}
                 });
             }
         }
