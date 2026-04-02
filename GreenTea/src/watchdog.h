@@ -16,11 +16,14 @@ public:
         std::string binary;
         std::vector<std::string> args;
         std::string working_dir;
+        int startup_delay_sec = 0;
         int max_restarts = 10;
         int restart_delay_sec = 2;
         bool auto_start = true;
+        int start_order = 0;
         // Runtime state
         pid_t pid = 0;
+        int parent_guard_fd = -1;
         bool running = false;
         int restart_count = 0;
         int64_t last_start_time = 0;
@@ -51,6 +54,7 @@ private:
     void monitorLoop();
     bool launchProcess(WatchedProcess& proc);
     bool killProcess(WatchedProcess& proc, int timeout_ms = 5000);
+    void closeParentGuardFd(WatchedProcess& proc);
 
     mutable std::mutex mutex_;
     std::map<std::string, WatchedProcess> processes_;

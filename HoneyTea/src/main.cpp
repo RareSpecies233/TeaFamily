@@ -1,6 +1,10 @@
 #include <csignal>
+#include <cerrno>
+#include <cstdlib>
 #include <iostream>
 #include <filesystem>
+#include <thread>
+#include <unistd.h>
 #include <tea/common.h>
 #include <tea/config.h>
 #include <tea/logger.h>
@@ -14,6 +18,47 @@ static HoneyTea* g_instance = nullptr;
 static void signalHandler(int sig) {
     spdlog::info("HoneyTea received signal {}, shutting down...", sig);
     g_running.store(false);
+}
+
+static void startParentGuardMonitor() {
+    const char* guard_fd_env = std::getenv("TEA_PARENT_GUARD_FD");
+    if (!guard_fd_env || !*guard_fd_env) {
+        return;
+    }
+
+    int guard_fd = -1;
+    try {
+        guard_fd = std::stoi(guard_fd_env);
+    } catch (...) {
+        return;
+    }
+
+    if (guard_fd < 0) {
+        return;
+    }
+
+    std::thread([guard_fd]() {
+        char byte = 0;
+        while (true) {
+            const ssize_t n = ::read(guard_fd, &byte, 1);
+            if (n == 0) {
+                spdlog::warn("Parent guard closed, HoneyTea will exit");
+                g_running.store(false);
+                ::raise(SIGTERM);
+                break;
+            }
+            if (n < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                spdlog::warn("Parent guard read failed (errno={}), HoneyTea will exit", errno);
+                g_running.store(false);
+                ::raise(SIGTERM);
+                break;
+            }
+        }
+        ::close(guard_fd);
+    }).detach();
 }
 
 int main(int argc, char* argv[]) {
@@ -39,6 +84,8 @@ int main(int argc, char* argv[]) {
     signal(SIGINT, signalHandler);
     signal(SIGTERM, signalHandler);
     signal(SIGPIPE, SIG_IGN);
+
+    startParentGuardMonitor();
 
     HoneyTea honey;
     g_instance = &honey;

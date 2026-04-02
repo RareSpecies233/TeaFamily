@@ -22,6 +22,8 @@
     <el-menu
       :default-active="activeMenuIndex"
       @select="handleMenuSelect"
+      @mousedown="handleMenuMouseDown"
+      @auxclick="handleMenuAuxClick"
       class="sidebar-menu"
       background-color="transparent"
       text-color="#6f6a5e"
@@ -41,6 +43,7 @@
         v-for="plugin in pluginPageEntries"
         :key="plugin.name"
         :index="`plugin:${plugin.name}`"
+        :data-plugin-name="plugin.name"
         class="dynamic-menu-item"
       >
         <el-icon v-if="!collapsed"><Grid /></el-icon>
@@ -260,10 +263,10 @@ function toggleCollapsed() {
   collapsed.value = !collapsed.value
 }
 
-function openPluginPage(name: string) {
+function openPluginPage(name: string, options: { forceStandalone?: boolean } = {}) {
   if (!name || name === '__empty') return
 
-  if (multiWindowMode.value) {
+  if (multiWindowMode.value || options.forceStandalone) {
     const to = router.resolve({
       name: 'plugin-window',
       params: { name },
@@ -290,6 +293,35 @@ function handleMenuSelect(index: string) {
   if (index.startsWith('plugin:')) {
     openPluginPage(index.slice('plugin:'.length))
   }
+}
+
+function pluginNameFromMouseEvent(event: MouseEvent) {
+  const target = event.target
+  if (!(target instanceof Element)) {
+    return ''
+  }
+  const menuItem = target.closest('.el-menu-item[data-plugin-name]')
+  if (!(menuItem instanceof HTMLElement)) {
+    return ''
+  }
+  return menuItem.dataset.pluginName || ''
+}
+
+function handleMenuMouseDown(event: MouseEvent) {
+  if (event.button !== 1) return
+  const pluginName = pluginNameFromMouseEvent(event)
+  if (!pluginName) return
+  event.preventDefault()
+  event.stopPropagation()
+  openPluginPage(pluginName, { forceStandalone: true })
+}
+
+function handleMenuAuxClick(event: MouseEvent) {
+  if (event.button !== 1) return
+  const pluginName = pluginNameFromMouseEvent(event)
+  if (!pluginName) return
+  event.preventDefault()
+  event.stopPropagation()
 }
 
 function handleDisconnect() {

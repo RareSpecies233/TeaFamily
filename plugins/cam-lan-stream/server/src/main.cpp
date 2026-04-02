@@ -49,7 +49,15 @@ std::atomic<bool> g_running{true};
 
 std::string g_bind_host = "0.0.0.0";
 std::string g_public_host = "127.0.0.1";
+std::string g_public_origin;
 int g_listen_port = 19731;
+
+std::string effectivePublicOrigin() {
+  if (!g_public_origin.empty()) {
+    return g_public_origin;
+  }
+  return "http://" + g_public_host + ":" + std::to_string(g_listen_port);
+}
 
 uint64_t nowMs() {
     return static_cast<uint64_t>(
@@ -213,8 +221,8 @@ json buildStatusResponse(const std::string& request_id) {
         {"server", {
             {"bind_host", g_bind_host},
             {"port", g_listen_port},
-            {"public_origin", "http://" + g_public_host + ":" + std::to_string(g_listen_port)},
-            {"mobile_page_url", "http://" + g_public_host + ":" + std::to_string(g_listen_port) + "/"}
+          {"public_origin", effectivePublicOrigin()},
+          {"mobile_page_url", effectivePublicOrigin() + "/"}
         }},
         {"devices", snapshotDevices()}
     };
@@ -255,7 +263,7 @@ std::string buildMobilePageHtml() {
   <div class="card">
     <h1>TeaFamily 局域网摄像头上报</h1>
     <p>选择摄像头后，页面会持续将 JPEG 帧上传到 LemonTea 插件服务。OrangeTea 可实时查看设备与画面。</p>
-    <p class="status warn">提示：移动浏览器通常要求 HTTPS 或局域网可信环境才能调用摄像头权限。</p>
+    <p id="secureHint" class="status warn">检测中...</p>
 
     <div class="row">
       <div class="col">
@@ -272,13 +280,17 @@ std::string buildMobilePageHtml() {
       <div class="col"><button id="refreshBtn" class="secondary">刷新摄像头列表</button></div>
       <div class="col"><button id="startBtn">开始串流</button></div>
       <div class="col"><button id="stopBtn" class="secondary">停止串流</button></div>
+      <div class="col"><button id="compatBtn" class="secondary">启用兼容模式</button></div>
+      <div class="col"><button id="captureBtn" class="secondary">拍照并上传</button></div>
     </div>
+    <input id="captureInput" type="file" accept="image/*" capture="environment" style="display:none" />
 
     <video id="preview" playsinline autoplay muted></video>
     <canvas id="canvas" width="640" height="360" style="display:none"></canvas>
 
     <div class="row">
       <div class="col"><div id="state" class="status">等待启动</div></div>
+      <div class="col"><div id="mode" class="status">模式: 未启动</div></div>
       <div class="col"><div id="fps" class="status">帧率: -</div></div>
     </div>
   </div>
@@ -294,20 +306,45 @@ std::string buildMobilePageHtml() {
     const elDeviceName = document.getElementById('deviceName')
     const elCamera = document.getElementById('cameraSelect')
     const elState = document.getElementById('state')
+    const elSecureHint = document.getElementById('secureHint')
+    const elMode = document.getElementById('mode')
     const elFps = document.getElementById('fps')
+    const elCompatBtn = document.getElementById('compatBtn')
+    const elCaptureBtn = document.getElementById('captureBtn')
+    const elCaptureInput = document.getElementById('captureInput')
     const video = document.getElementById('preview')
     const canvas = document.getElementById('canvas')
     const ctx = canvas.getContext('2d')
 
     let stream = null
+    let compatibilityMode = false
     let pushTimer = null
     let registerTimer = null
     let frameCount = 0
     let fpsTimer = null
 
+    function isSecureContextLike() {
+      return window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+    }
+
+    function updateSecureHint() {
+      if (isSecureContextLike()) {
+        elSecureHint.textContent = '当前环境可直接调用摄像头实时串流（HTTPS/localhost）。'
+        elSecureHint.classList.remove('warn')
+      } else {
+        elSecureHint.textContent = '当前为非 HTTPS 环境，部分浏览器会阻止摄像头实时权限。可点击“启用兼容模式”后用“拍照并上传”替代。'
+        elSecureHint.classList.add('warn')
+      }
+    }
+
     function setState(text, warn = false) {
       elState.textContent = text
       elState.classList.toggle('warn', !!warn)
+    }
+
+    function setMode(text, warn = false) {
+      elMode.textContent = '模式: ' + text
+      elMode.classList.toggle('warn', !!warn)
     }
 
     function currentCameraLabel() {
@@ -357,7 +394,7 @@ std::string buildMobilePageHtml() {
     }
 
     async function pushFrameLoop() {
-      if (!stream) {
+      if (!stream || compatibilityMode) {
         return
       }
 
@@ -386,6 +423,12 @@ std::string buildMobilePageHtml() {
     }
 
     async function startStreaming() {
+      if (compatibilityMode) {
+        setState('当前为兼容模式，请使用“拍照并上传”')
+        setMode('兼容上传', true)
+        return
+      }
+
       if (!navigator.mediaDevices?.getUserMedia) {
         setState('当前浏览器不支持摄像头接口', true)
         return
@@ -420,6 +463,7 @@ std::string buildMobilePageHtml() {
         }, 2000)
 
         setState('串流中：' + (currentCameraLabel() || elCamera.value || '默认摄像头'))
+        setMode('实时串流')
       } catch (e) {
         setState('启动失败：' + (e.message || e), true)
       }
@@ -445,6 +489,53 @@ std::string buildMobilePageHtml() {
       video.srcObject = null
       elFps.textContent = '帧率: -'
       setState('已停止')
+      if (!compatibilityMode) {
+        setMode('未启动')
+      }
+    }
+
+    function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onerror = () => reject(new Error('读取图片失败'))
+        reader.onload = () => resolve(reader.result)
+        reader.readAsDataURL(file)
+      })
+    }
+
+    async function uploadCapturedFile(file) {
+      const dataUrl = await fileToDataUrl(file)
+      await jsonFetch('/api/publish-frame', {
+        device_id: deviceId,
+        device_name: (elDeviceName.value || '').trim() || navigator.userAgent,
+        camera_id: elCamera.value || 'capture-camera',
+        camera_label: currentCameraLabel() || '兼容拍照上传',
+        image_data_url: dataUrl,
+      })
+      setState('已上传拍照帧：' + new Date().toLocaleTimeString())
+      setMode('兼容上传', true)
+    }
+
+    function enableCompatibilityMode() {
+      compatibilityMode = true
+      stopStreaming()
+      setMode('兼容上传', true)
+      setState('兼容模式已开启：点击“拍照并上传”即可')
+    }
+
+    function handleCaptureFileChange(event) {
+      const input = event.target
+      const file = input.files && input.files[0]
+      if (!file) {
+        return
+      }
+      uploadCapturedFile(file)
+        .catch((e) => {
+          setState('上传拍照失败：' + (e.message || e), true)
+        })
+        .finally(() => {
+          input.value = ''
+        })
     }
 
     document.getElementById('refreshBtn').addEventListener('click', () => {
@@ -452,6 +543,15 @@ std::string buildMobilePageHtml() {
     })
     document.getElementById('startBtn').addEventListener('click', startStreaming)
     document.getElementById('stopBtn').addEventListener('click', stopStreaming)
+    elCompatBtn.addEventListener('click', enableCompatibilityMode)
+    elCaptureBtn.addEventListener('click', () => {
+      if (!compatibilityMode) {
+        setState('请先点击“启用兼容模式”', true)
+        return
+      }
+      elCaptureInput.click()
+    })
+    elCaptureInput.addEventListener('change', handleCaptureFileChange)
 
     window.addEventListener('beforeunload', () => {
       stopStreaming()
@@ -462,9 +562,15 @@ std::string buildMobilePageHtml() {
       elDeviceName.addEventListener('change', () => {
         localStorage.setItem('tea_cam_stream_device_name', elDeviceName.value || '')
       })
+      updateSecureHint()
       await refreshCameras()
       await registerDevice().catch(() => {})
       setState('摄像头就绪，点击“开始串流”')
+      setMode('未启动')
+
+      if (!isSecureContextLike()) {
+        enableCompatibilityMode()
+      }
     })()
   </script>
 </body>
@@ -651,6 +757,14 @@ int main() {
         g_public_host = public_host;
     }
 
+    const char* public_origin = std::getenv("TEA_CAM_STREAM_PUBLIC_ORIGIN");
+    if (public_origin && *public_origin) {
+      g_public_origin = public_origin;
+      while (!g_public_origin.empty() && g_public_origin.back() == '/') {
+        g_public_origin.pop_back();
+      }
+    }
+
     configureHttpRoutes();
 
     g_http_thread = std::thread([]() {
@@ -673,8 +787,8 @@ int main() {
         {"server", {
             {"bind_host", g_bind_host},
             {"port", g_listen_port},
-            {"public_origin", "http://" + g_public_host + ":" + std::to_string(g_listen_port)},
-            {"mobile_page_url", "http://" + g_public_host + ":" + std::to_string(g_listen_port) + "/"}
+          {"public_origin", effectivePublicOrigin()},
+          {"mobile_page_url", effectivePublicOrigin() + "/"}
         }}
     });
 
