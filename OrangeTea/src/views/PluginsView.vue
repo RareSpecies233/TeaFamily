@@ -3,7 +3,7 @@
     <header class="hero">
       <div class="hero-left">
         <h2>统一插件管理台</h2>
-        <p>插件包上传后将安装到 LemonTea、HoneyTea 与 OrangeTea 三端</p>
+        <p>插件包上传后会按插件类型自动分发到 LemonTea / HoneyTea / OrangeTea</p>
       </div>
 
       <div class="hero-actions">
@@ -126,7 +126,7 @@
             <el-descriptions-item label="描述">{{ previewInfo?.description || '-' }}</el-descriptions-item>
             <el-descriptions-item label="插件类型">{{ pluginTypeLabel(previewInfo?.plugin_type) }}</el-descriptions-item>
             <el-descriptions-item label="安装目标">
-              LemonTea + HoneyTea + OrangeTea（固定三端）
+              {{ distributionTargetsLabel(previewInfo) }}
             </el-descriptions-item>
             <el-descriptions-item label="在线 HoneyTea 数量">
               {{ previewInfo?.connected_honey_count ?? 0 }}
@@ -140,8 +140,8 @@
           </el-descriptions>
 
           <el-alert
-            v-if="(previewInfo?.connected_honey_count ?? 0) === 0"
-            title="当前没有在线 HoneyTea，确认后仍会安装 LemonTea 与前端，HoneyTea 侧会标记未完成。"
+            v-if="needsHoneyInstall(previewInfo?.plugin_type) && (previewInfo?.connected_honey_count ?? 0) === 0"
+            :title="noHoneyWarning(previewInfo?.plugin_type)"
             type="warning"
             :closable="false"
             style="margin-top: 12px"
@@ -199,6 +199,7 @@ interface PluginPreviewInfo {
   version: string
   description: string
   plugin_type: string
+  distribution_targets?: string[]
   connected_honey_count: number
   capabilities: string[]
   depends_on: string[]
@@ -266,6 +267,34 @@ function pluginTypeLabel(type?: string) {
   if (type === 'lemon-only') return '仅 LemonTea'
   if (type === 'honey-only') return '仅 HoneyTea'
   return '双端插件'
+}
+
+function needsHoneyInstall(type?: string) {
+  return type !== 'lemon-only'
+}
+
+function distributionTargetsLabel(info: PluginPreviewInfo | null) {
+  if (!info) return '-'
+
+  const targets = Array.isArray(info.distribution_targets) ? info.distribution_targets : []
+  if (targets.length > 0) {
+    return targets.join(' + ')
+  }
+
+  if (info.plugin_type === 'lemon-only') {
+    return 'LemonTea + OrangeTea'
+  }
+  if (info.plugin_type === 'honey-only') {
+    return 'HoneyTea + OrangeTea'
+  }
+  return 'LemonTea + HoneyTea + OrangeTea'
+}
+
+function noHoneyWarning(type?: string) {
+  if (type === 'honey-only') {
+    return '当前没有在线 HoneyTea，确认后仅会安装前端页面，HoneyTea 运行时安装将跳过。'
+  }
+  return '当前没有在线 HoneyTea，确认后仍会安装 LemonTea 与前端，HoneyTea 侧会标记未完成。'
 }
 
 function localStateType(state: string) {

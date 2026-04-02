@@ -1,6 +1,10 @@
 #include "http_server.h"
 #include "lemon_tea.h"
+#ifdef TEA_HTTPLIB_HEADER_FILE
+#include TEA_HTTPLIB_HEADER_FILE
+#else
 #include <httplib.h>
+#endif
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
 #include <filesystem>
@@ -285,6 +289,28 @@ bool parseUnifiedMeta(const UploadedArchive& archive, UnifiedPackageMeta& meta, 
     return true;
 }
 
+bool shouldInstallLocalRuntime(const std::string& plugin_type) {
+    return plugin_type != "honey-only";
+}
+
+bool shouldInstallRemoteRuntime(const std::string& plugin_type) {
+    return plugin_type != "lemon-only";
+}
+
+json buildDistributionTargets(const UnifiedPackageMeta& meta) {
+    json targets = json::array();
+    if (shouldInstallLocalRuntime(meta.plugin_type)) {
+        targets.push_back("LemonTea");
+    }
+    if (shouldInstallRemoteRuntime(meta.plugin_type)) {
+        targets.push_back("HoneyTea");
+    }
+    if (meta.has_frontend) {
+        targets.push_back("OrangeTea");
+    }
+    return targets;
+}
+
 std::vector<std::string> connectedHoneyNodes(const LemonTea& lemon) {
     std::vector<std::string> connected_nodes;
     for (const auto& client : lemon.getClients()) {
@@ -419,13 +445,14 @@ void HttpApi::setupRoutes() {
     });
 
     svr.Post("/api/plugins/install", [this](const httplib::Request& req, httplib::Response& res) {
-        if (!req.has_file("plugin")) {
+        auto file_it = req.files.find("plugin");
+        if (file_it == req.files.end()) {
             res.status = 400;
             res.set_content(R"({"error":"missing plugin file"})", "application/json");
             return;
         }
 
-        auto file = req.get_file_value("plugin");
+        const auto& file = file_it->second;
         std::string name = req.has_param("name") ? req.get_param_value("name") : "";
 
         std::string parse_error;
@@ -453,13 +480,14 @@ void HttpApi::setupRoutes() {
     });
 
     svr.Post("/api/plugins/inspect", [this](const httplib::Request& req, httplib::Response& res) {
-        if (!req.has_file("plugin")) {
+        auto file_it = req.files.find("plugin");
+        if (file_it == req.files.end()) {
             res.status = 400;
             res.set_content(R"({"error":"missing plugin file"})", "application/json");
             return;
         }
 
-        auto file = req.get_file_value("plugin");
+        const auto& file = file_it->second;
         std::string parse_error;
         auto archive = unpackArchive(file.content, "tea_inspect_plugin_", parse_error);
         if (!archive) {
@@ -503,7 +531,7 @@ void HttpApi::setupRoutes() {
             {"capabilities", root_manifest->value("capabilities", json::array())},
             {"has_frontend", meta.has_frontend},
             {"frontend", frontend_manifest},
-            {"distribution_targets", json::array({"LemonTea", "HoneyTea", "OrangeTea"})},
+            {"distribution_targets", buildDistributionTargets(meta)},
             {"connected_honey_nodes", connected_nodes},
             {"connected_honey_count", connected_nodes.size()},
             {"file_name", file.filename},
@@ -515,13 +543,14 @@ void HttpApi::setupRoutes() {
     });
 
     svr.Post("/api/plugins/install-unified", [this](const httplib::Request& req, httplib::Response& res) {
-        if (!req.has_file("plugin")) {
+        auto file_it = req.files.find("plugin");
+        if (file_it == req.files.end()) {
             res.status = 400;
             res.set_content(R"({"error":"missing plugin file"})", "application/json");
             return;
         }
 
-        auto file = req.get_file_value("plugin");
+        const auto& file = file_it->second;
         std::string parse_error;
         auto archive = unpackArchive(file.content, "tea_unified_plugin_", parse_error);
         if (!archive) {
@@ -540,32 +569,43 @@ void HttpApi::setupRoutes() {
 
         std::vector<uint8_t> runtime_data(file.content.begin(), file.content.end());
 
-        bool local_ok = lemon_.installPlugin(meta.name, runtime_data);
+        const bool local_required = shouldInstallLocalRuntime(meta.plugin_type);
+        const bool remote_required = shouldInstallRemoteRuntime(meta.plugin_type);
+        const bool frontend_required = meta.has_frontend;
 
-        bool frontend_ok = false;
+        bool local_ok = true;
+        if (local_required) {
+            local_ok = lemon_.installPlugin(meta.name, runtime_data);
+        }
+
+        bool frontend_ok = true;
         std::string frontend_name;
         std::string frontend_error;
-        auto frontend = installFrontendFromArchive(*archive, lemon_.frontendPluginsDir(), meta.name);
-        frontend_ok = frontend.success;
-        frontend_name = frontend.name;
-        frontend_error = frontend.error;
-        if (!frontend_ok) {
-            spdlog::warn("Unified frontend install failed for {}: {}", meta.name, frontend_error);
+        if (frontend_required) {
+            auto frontend = installFrontendFromArchive(*archive, lemon_.frontendPluginsDir(), meta.name);
+            frontend_ok = frontend.success;
+            frontend_name = frontend.name;
+            frontend_error = frontend.error;
+            if (!frontend_ok) {
+                spdlog::warn("Unified frontend install failed for {}: {}", meta.name, frontend_error);
+            }
         }
 
         std::vector<json> remote_results;
         bool remote_ok = true;
         std::vector<std::string> warnings;
 
-        auto targets = connectedHoneyNodes(lemon_);
-        if (targets.empty()) {
-            remote_ok = false;
-            warnings.push_back("no online HoneyTea clients, remote install skipped");
-        }
-        for (const auto& node_id : targets) {
-            bool ok = lemon_.installRemotePlugin(node_id, meta.name, runtime_data);
-            remote_results.push_back({{"node_id", node_id}, {"success", ok}});
-            remote_ok = remote_ok && ok;
+        if (remote_required) {
+            auto targets = connectedHoneyNodes(lemon_);
+            if (targets.empty()) {
+                remote_ok = false;
+                warnings.push_back("no online HoneyTea clients, remote install skipped");
+            }
+            for (const auto& node_id : targets) {
+                bool ok = lemon_.installRemotePlugin(node_id, meta.name, runtime_data);
+                remote_results.push_back({{"node_id", node_id}, {"success", ok}});
+                remote_ok = remote_ok && ok;
+            }
         }
 
         cleanupArchive(*archive);
@@ -576,6 +616,10 @@ void HttpApi::setupRoutes() {
             {"name", meta.name},
             {"version", meta.version},
             {"plugin_type", meta.plugin_type},
+            {"distribution_targets", buildDistributionTargets(meta)},
+            {"local_required", local_required},
+            {"remote_required", remote_required},
+            {"frontend_required", frontend_required},
             {"local_installed", local_ok},
             {"frontend_installed", frontend_ok},
             {"frontend_name", frontend_name},
@@ -619,13 +663,14 @@ void HttpApi::setupRoutes() {
     svr.Post(R"(/api/clients/(\w[\w-]*)/plugins/install)",
         [this](const httplib::Request& req, httplib::Response& res) {
         auto node_id = req.matches[1].str();
-        if (!req.has_file("plugin")) {
+        auto file_it = req.files.find("plugin");
+        if (file_it == req.files.end()) {
             res.status = 400;
             res.set_content(R"({"error":"missing plugin file"})", "application/json");
             return;
         }
 
-        auto file = req.get_file_value("plugin");
+        const auto& file = file_it->second;
         std::string name = req.has_param("name") ? req.get_param_value("name") : "";
 
         std::string parse_error;
@@ -759,12 +804,13 @@ void HttpApi::setupRoutes() {
 
     // ===== Binary Update =====
     svr.Post("/api/update/lemon-tea", [this](const httplib::Request& req, httplib::Response& res) {
-        if (!req.has_file("binary")) {
+        auto file_it = req.files.find("binary");
+        if (file_it == req.files.end()) {
             res.status = 400;
             res.set_content(R"({"error":"missing binary file"})", "application/json");
             return;
         }
-        auto file = req.get_file_value("binary");
+        const auto& file = file_it->second;
         std::string temp_path = "/tmp/lemontea_update_" + std::to_string(tea::nowMs());
         {
             std::ofstream out(temp_path, std::ios::binary);
@@ -776,12 +822,13 @@ void HttpApi::setupRoutes() {
 
     svr.Post(R"(/api/update/honey-tea/(\w[\w-]*))", [this](const httplib::Request& req, httplib::Response& res) {
         auto node_id = req.matches[1].str();
-        if (!req.has_file("binary")) {
+        auto file_it = req.files.find("binary");
+        if (file_it == req.files.end()) {
             res.status = 400;
             res.set_content(R"({"error":"missing binary file"})", "application/json");
             return;
         }
-        auto file = req.get_file_value("binary");
+        const auto& file = file_it->second;
         // Forward binary to HoneyTea via TCP file transfer
         std::vector<uint8_t> data(file.content.begin(), file.content.end());
         auto conn = lemon_.sendPluginMessage(node_id, "__update__",
@@ -846,13 +893,14 @@ void HttpApi::setupRoutes() {
 
     // Upload frontend plugin
     svr.Post("/api/frontend-plugins/install", [this](const httplib::Request& req, httplib::Response& res) {
-        if (!req.has_file("plugin")) {
+        auto file_it = req.files.find("plugin");
+        if (file_it == req.files.end()) {
             res.status = 400;
             res.set_content(R"({"error":"missing plugin file"})", "application/json");
             return;
         }
 
-        auto file = req.get_file_value("plugin");
+        const auto& file = file_it->second;
         std::string fallback_name = req.has_param("name") ? req.get_param_value("name") : "";
 
         std::string parse_error;

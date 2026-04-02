@@ -46,19 +46,33 @@ Base URL 示例：`http://127.0.0.1:9528`
 - 字段：`plugin`（文件），`name`（可选）
 
 ### POST /api/plugins/install-unified
-统一安装插件（推荐）：固定分发到 LemonTea + 所有在线 HoneyTea + OrangeTea 前端目录。
+统一安装插件（推荐）：按 `plugin_type` 自动分发到 LemonTea / HoneyTea / OrangeTea。
 - `multipart/form-data`
 - 字段：`plugin`（统一插件包，必填）
+- 分发规则：
+  - `distributed` -> LemonTea + HoneyTea（所有在线节点）+ OrangeTea（若包含前端）
+  - `lemon-only` -> LemonTea + OrangeTea（若包含前端）
+  - `honey-only` -> HoneyTea（所有在线节点）+ OrangeTea（若包含前端）
+- 返回关键字段：
+  - `distribution_targets`：本次目标列表
+  - `local_required` / `remote_required` / `frontend_required`
+  - `local_installed` / `frontend_installed` / `remote_results`
+  - `warnings`（例如无在线 HoneyTea 时的提示）
 
 ### POST /api/plugins/inspect
 统一安装前预览插件信息（用于前端确认弹窗）。
 - `multipart/form-data`
 - 字段：`plugin`（统一插件包，必填）
 - 返回：插件名称、版本、描述、能力、依赖、在线 HoneyTea 数量等。
+- 关键字段：
+  - `plugin.distribution_targets`：基于 `plugin_type` 推导出的安装目标
+  - `plugin.connected_honey_nodes` / `plugin.connected_honey_count`
 
 ## 插件消息转发
 ### POST /api/plugin-message
 向某个节点的某个插件发送消息。
+
+说明：`node_id` 可为空或等于 LemonTea 自身节点，此时消息会投递到 LemonTea 本地插件。
 
 请求体示例：
 ```json
@@ -98,6 +112,8 @@ Base URL 示例：`http://127.0.0.1:9528`
 
 ### POST /api/plugin-rpc
 向插件发送消息并等待匹配响应（按 `request_id` + `expected_actions` 匹配）。
+
+说明：`node_id` 可选；为空时默认请求 LemonTea 本地插件。
 
 请求示例：
 ```json

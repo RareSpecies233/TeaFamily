@@ -51,6 +51,13 @@ TeaFamily 是一套分布式进程管理系统，包含以下组件：
 - `LINUX_X64_CC` / `LINUX_X64_CXX` / `LINUX_X64_SYSROOT`
 - `RPI5_CC` / `RPI5_CXX` / `RPI5_SYSROOT`
 - `BUILD_ROOT` / `DIST_ROOT`
+- `TEA_CROSS_DEPS_ROOT`（交叉依赖缓存目录，默认 `build-cross/cross-deps`）
+- `TEA_BROTLI_VERSION`（自动下载构建 Brotli 时使用的版本，默认 `1.1.0`）
+
+说明：
+- 脚本会优先从交叉编译器自动探测 `sysroot`，也支持通过 `*_SYSROOT` 显式指定。
+- 目标 `sysroot` 必须包含 OpenSSL（不会通过关闭功能绕过）。
+- 若目标 `sysroot` 缺少 Brotli，脚本会自动为对应目标交叉编译并注入 toolchain 搜索路径。
 
 更多脚本说明见 [macOS 构建脚本说明](docs/macOS_build_release.md)
 
@@ -58,7 +65,7 @@ TeaFamily 是一套分布式进程管理系统，包含以下组件：
 ```bash
 mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+cmake --build . --config Release -j
 ```
 
 ## 配置
@@ -71,6 +78,7 @@ make -j$(nproc)
 - **SSH插件** - 远程终端访问
 - **文件管理插件** - 远程文件浏览与管理
 - **监控插件** - 系统资源监控与图表展示
+- **局域网摄像头串流插件** - 移动端摄像头采集与 OrangeTea 实时预览（仅 LemonTea 安装）
 
 详见 [插件开发文档](docs/plugin-development.md)
 
@@ -78,6 +86,7 @@ make -j$(nproc)
 - [SSH 插件](docs/plugin-ssh.md)
 - [文件管理插件](docs/plugin-file-manager.md)
 - [监控插件](docs/plugin-monitor.md)
+- [局域网摄像头串流插件](docs/plugin-cam-lan-stream.md)
 
 LemonTea HTTP API：
 - [API 文档](docs/lemontea-api.md)
@@ -87,6 +96,7 @@ macOS 插件导出脚本：
 ./scripts/macOS_export_ssh_plugin.sh
 ./scripts/macOS_export_file_manager_plugin.sh
 ./scripts/macOS_export_monitor_plugin.sh
+./scripts/macOS_export_cam_lan_stream_plugin.sh
 ```
 
 跨目标插件导出脚本（LemonTea: Linux x64 / HoneyTea: Raspberry Pi 5）：
@@ -96,12 +106,19 @@ macOS 插件导出脚本：
 ./scripts/export_monitor_plugin_linux_x64_lemon_rpi5_honey.sh
 ```
 
+LemonTea-only 插件导出脚本（Linux x64）：
+```bash
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh
+```
+
 脚本会导出统一安装包（例如 `ssh-unified-macos.tar.gz`），用于 OrangeTea 的统一插件安装入口。
 
-默认 release 构建产物不会预装任何插件（`dist/plugins` 与 `dist/frontend_plugins` 初始为空），需通过 OrangeTea 上传统一插件包后安装。
+统一安装入口会根据 `plugin_type` 自动分发：
+- `distributed` -> LemonTea + HoneyTea（在线节点）+ OrangeTea 前端（若有）
+- `lemon-only` -> LemonTea + OrangeTea 前端（若有）
+- `honey-only` -> HoneyTea（在线节点）+ OrangeTea 前端（若有）
 
-端到端在线测试记录：
-- [E2E 测试文档](docs/e2e-online-test.md)
+默认 release 构建产物不会预装任何插件（`dist/plugins` 与 `dist/frontend_plugins` 初始为空），需通过 OrangeTea 上传统一插件包后安装。
 
 ## OrangeTea 前端
 
@@ -251,10 +268,6 @@ serve -s /opt/teafamily/frontend -l 8080
 ```
 
 ### 常见问题（FAQ）
-
-- 构建后为什么 `dist` 里会出现 `.h` / `.cmake` 文件？
-      - 这是因为执行了 `cmake --install`，某些依赖（如 httplib）会安装开发文件到前缀目录。
-      - 现在构建脚本已调整为不执行该步骤，并在打包阶段清理 `dist/include`、`dist/lib` 等目录，`dist` 只保留运行时文件。
 
 - 只启动 GreenTea 会自动拉起 LemonTea 和 HoneyTea 吗？
       - 会，但前提是 `GreenTea` 配置中的 `processes[].auto_start=true`，并且 `binary` 与 `args` 路径正确。

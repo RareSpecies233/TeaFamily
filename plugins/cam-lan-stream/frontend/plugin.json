@@ -1,0 +1,9 @@
+{
+  "name": "cam-lan-stream",
+  "version": "1.0.0",
+  "entry": "index.js",
+  "title": "摄像头串流",
+  "icon": "video-camera",
+  "route": "/plugin/cam-lan-stream",
+  "description": "局域网移动端摄像头采集与实时预览"
+}

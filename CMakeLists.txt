@@ -43,6 +43,12 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(nlohmann_json httplib spdlog)
 
+# Keep JSON ABI stable across all targets by forcing the vendored nlohmann/json
+# include directory to be searched before system include paths.
+if(DEFINED nlohmann_json_SOURCE_DIR AND EXISTS "${nlohmann_json_SOURCE_DIR}/include/nlohmann/json.hpp")
+    include_directories(BEFORE "${nlohmann_json_SOURCE_DIR}/include")
+endif()
+
 # Subdirectories
 add_subdirectory(common)
 add_subdirectory(GreenTea)

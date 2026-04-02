@@ -65,6 +65,8 @@ dist/
     LemonTea
     HoneyTea
     GreenTea
+  frontend_plugins/
+    # 默认为空（统一插件安装时写入）
   plugins/
     # 默认为空（插件需通过 OrangeTea 上传安装）
   config/
@@ -92,20 +94,23 @@ mkdir -p logs
 
 - `scripts/macOS_build_release.sh` 默认为 macOS 环境设计（使用 `sysctl`、`CMAKE_OSX_ARCHITECTURES` 等）。要在树莓派（ARM）上运行：
   - 建议在目标设备（树莓派）上直接执行 CMake 构建；或使用交叉编译生成 ARM 二进制并将其放入 `dist`。
-  - 确保插件与 HoneyTea/HoneyTea 本身都为相同架构编译。
+  - 确保 HoneyTea 与插件运行时都为相同架构编译。
 
 ## 插件导出脚本（macOS）
 
-为了独立分发三个内置插件，项目新增了以下导出脚本：
+为了独立分发内置插件，项目提供以下导出脚本：
 
 ```bash
 ./scripts/macOS_export_ssh_plugin.sh
 ./scripts/macOS_export_file_manager_plugin.sh
 ./scripts/macOS_export_monitor_plugin.sh
+./scripts/macOS_export_cam_lan_stream_plugin.sh
 ```
 
 每个脚本会生成一个统一包：
 - 统一插件包：`<plugin>-unified-macos.tar.gz`（包含运行时与前端，供 OrangeTea 统一安装入口使用）
+
+说明：`cam-lan-stream` 为 `lemon-only` 插件，统一安装时只会安装到 LemonTea（以及前端页面），不会要求 HoneyTea 运行时。
 
 ## 常见问题与排查
 
