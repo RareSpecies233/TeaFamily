@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
 # TeaFamily macOS All-in-One Build + Plugin Export Script
 # Usage: ./scripts/macOS_all_in_one.sh
-# 1. 是否导出 macOS 版本 LemonTea/GreenTea/HoneyTea
-# 2. 是否 clean 构建
-# 3. 是否导出 Linux x64 LemonTea/GreenTea + Raspberry Pi 5 GreenTea/HoneyTea
-# 4. 是否导出 macOS-LemonTea/macOS-HoneyTea 的所有插件
-# 5. 是否导出 macOS-LemonTea/rpi5-HoneyTea 的所有插件
-# 6. 是否导出 linux-x64-LemonTea/rpi5-HoneyTea 的所有插件
 
 set -euo pipefail
 
@@ -26,9 +20,9 @@ ask() {
         ans="${ans:-$default}"
         ans="$(echo "$ans" | tr '[:upper:]' '[:lower:]')"
         case "$ans" in
-            y|yes|1) return 0 ;; 
-            n|no|2) return 1 ;; 
-            *) echo "请输入 y/n/1/2" ;; 
+            y|yes|1) return 0 ;;
+            n|no|2) return 1 ;;
+            *) echo "请输入 1/y 或 2/n" ;;
         esac
     done
 }
@@ -42,31 +36,30 @@ should_export_plugins_macos_macos=false
 should_export_plugins_macos_rpi5=false
 should_export_plugins_linux_rpi5=false
 
-if ask "是否导出 macOS 版本 LemonTea/GreenTea/HoneyTea？(y/n)" n; then
+if ask "是否导出 macOS 版本 LemonTea/GreenTea/HoneyTea？(1或y确认/2或n取消)" n; then
     should_export_macos=true
 fi
 
-if ask "是否 clean 构建？(y/n)" n; then
+if ask "是否 clean 构建？(1或y确认/2或n取消)" n; then
     should_clean=true
 fi
 
-if ask "是否导出 Linux x64 版本 LemonTea/GreenTea 与 树莓派5 版本 GreenTea/HoneyTea？(y/n)" n; then
+if ask "是否导出 Linux x64 版本 LemonTea/GreenTea 与 树莓派5 版本 GreenTea/HoneyTea？(1或y确认/2或n取消)" n; then
     should_export_cross=true
 fi
 
-if ask "是否导出 macOS-LemonTea/macOS-HoneyTea 的所有插件？(y/n)" n; then
+if ask "是否导出 macOS-LemonTea/macOS-HoneyTea 的所有插件？(1或y确认/2或n取消)" n; then
     should_export_plugins_macos_macos=true
 fi
 
-if ask "是否导出 macOS-LemonTea/树莓派5-HoneyTea 的所有插件？(y/n)" n; then
+if ask "是否导出 macOS-LemonTea/树莓派5-HoneyTea 的所有插件？(1或y确认/2或n取消)" n; then
     should_export_plugins_macos_rpi5=true
 fi
 
-if ask "是否导出 Linux x64-LemonTea/树莓派5-HoneyTea 的所有插件？(y/n)" n; then
+if ask "是否导出 Linux x64-LemonTea/树莓派5-HoneyTea 的所有插件？(1或y确认/2或n取消)" n; then
     should_export_plugins_linux_rpi5=true
 fi
 
-# Build macOS runtime
 if [[ "$should_export_macos" == true ]]; then
     log "开始 macOS 编译流程"
     if [[ "$should_clean" == true ]]; then
@@ -77,7 +70,6 @@ if [[ "$should_export_macos" == true ]]; then
     "$SCRIPT_DIR/macOS_build_release.sh"
 fi
 
-# Build cross targets
 if [[ "$should_export_cross" == true ]]; then
     log "开始交叉编译流程（Linux x64 / Raspberry Pi 5）"
     if [[ "$should_clean" == true ]]; then
@@ -88,7 +80,6 @@ if [[ "$should_export_cross" == true ]]; then
     "$SCRIPT_DIR/build_linux_x64_and_rpi5.sh"
 fi
 
-# Helper: 插件导出函数
 export_plugins_to() {
     local lemon_platform="$1"
     local honey_platform="$2"
@@ -98,41 +89,46 @@ export_plugins_to() {
 
     mkdir -p "$PROJECT_ROOT/dist/plugin-exports"
 
-    # 支持插件目录中可用插件
     local plugins=(ssh file-manager monitor cam-lan-stream)
-    for plugin in "${plugins[@]}"; do
-        local invoker="$SCRIPT_DIR/export_${plugin//-/}_plugin_linux_x64_lemon_rpi5_honey.sh"
-        if [[ ! -x "$invoker" && ! -f "$invoker" ]]; then
-            invoker="$SCRIPT_DIR/export_plugin_linux_x64_lemon_rpi5_honey.sh"
-        fi
+    local invokers=(
+      export_ssh_plugin_linux_x64_lemon_rpi5_honey.sh
+      export_file_manager_plugin_linux_x64_lemon_rpi5_honey.sh
+      export_monitor_plugin_linux_x64_lemon_rpi5_honey.sh
+      export_cam_lan_stream_plugin_linux_x64.sh
+    )
 
-        if [[ "$plugin" == "cam-lan-stream" ]]; then
-            invoker="$SCRIPT_DIR/export_cam_lan_stream_plugin_linux_x64_lemon_rpi5_honey.sh"
-        fi
+    local count=${#plugins[@]}
+    for ((i=0; i<count; i++)); do
+        local plugin=${plugins[i]}
+        local invoker_script=${invokers[i]}
+        local invoker="$SCRIPT_DIR/$invoker_script"
 
         if [[ ! -x "$invoker" && ! -f "$invoker" ]]; then
-            log "WARNING: 未找到插件导出脚本: $plugin (skip)"
+            log "WARNING: 未找到插件导出脚本: $invoker_script (skip)"
             continue
         fi
 
         log "导出插件 $plugin"
-        "$invoker" "$plugin" "tea-plugin-${plugin//-/}" "tea-plugin-${plugin//-/}" --lemon-platform "$lemon_platform" --honey-platform "$honey_platform" || {
-            log "ERROR: 插件 $plugin 导出失败"
-        }
+        if [[ "$plugin" == "cam-lan-stream" ]]; then
+            "$invoker" --lemon-platform "$lemon_platform" --output-dir "$PROJECT_ROOT/dist/plugin-exports/$plugin" || {
+                log "ERROR: 插件 $plugin 导出失败"
+            }
+        else
+            "$invoker" --lemon-platform "$lemon_platform" --honey-platform "$honey_platform" --output-dir "$PROJECT_ROOT/dist/plugin-exports/$plugin" || {
+                log "ERROR: 插件 $plugin 导出失败"
+            }
+        fi
     done
 }
 
-# macOS-LemonTea/macOS-HoneyTea
 if [[ "$should_export_plugins_macos_macos" == true ]]; then
     export_plugins_to "macos" "macos" "macos/macos"
 fi
 
-# macOS-LemonTea/rpi5-HoneyTea
 if [[ "$should_export_plugins_macos_rpi5" == true ]]; then
     export_plugins_to "macos" "rpi5" "macos/rpi5"
 fi
 
-# linux-x64-LemonTea/rpi5-HoneyTea
 if [[ "$should_export_plugins_linux_rpi5" == true ]]; then
     export_plugins_to "linux-x64" "rpi5" "linux64/rpi5"
 fi
