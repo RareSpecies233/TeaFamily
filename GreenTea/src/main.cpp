@@ -38,9 +38,10 @@ int main(int argc, char* argv[]) {
     std::string log_path = config.get<std::string>("log_path", "logs/greentea.log");
     tea::Logger::init("GreenTea", log_path);
     const auto config_abs = fs::absolute(config_path);
-    const auto config_dir = config_abs.parent_path();
+    const auto runtime_base_dir = fs::current_path();
     spdlog::info("GreenTea bootstrap: pid={}, cwd='{}', config='{}'",
                  ::getpid(), fs::current_path().string(), config_abs.string());
+    spdlog::info("Watchdog path base directory: {}", runtime_base_dir.string());
     spdlog::info("GreenTea starting...");
 
     // Setup signal handlers
@@ -50,7 +51,7 @@ int main(int argc, char* argv[]) {
 
     // Create watchdog
     Watchdog watchdog;
-    watchdog.loadConfig(config, config_dir.string());
+    watchdog.loadConfig(config, runtime_base_dir.string());
 
     // Create updater
     uint16_t update_port = config.get<int>("listen_port", tea::DEFAULT_GREENTEA_PORT);
