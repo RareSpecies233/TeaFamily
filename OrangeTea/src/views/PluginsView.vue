@@ -3,7 +3,7 @@
     <header class="hero">
       <div class="hero-left">
         <h2>统一插件管理台</h2>
-        <p>插件包上传后会按插件类型自动分发到 LemonTea / HoneyTea / OrangeTea</p>
+        <p>删除插件后可能无法自动刷新界面，请尝试手动点击刷新按钮。</p>
       </div>
 
       <div class="hero-actions">
