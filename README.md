@@ -72,6 +72,10 @@ cmake --build . --config Release -j
 
 每个组件都有独立的 `config.json` 配置文件，详见各组件目录。
 
+## 端口说明
+
+更多端口详情请参考：[TeaFamily 端口需求汇总](docs/TeaFamily_ports.md)。
+
 ## 插件
 
 内置插件：
