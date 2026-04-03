@@ -77,8 +77,9 @@ int main(int argc, char* argv[]) {
     }
 
     std::string log_path = config.get<std::string>("log_path", "logs/lemontea.log");
-    fs::create_directories(fs::path(log_path).parent_path());
     tea::Logger::init("LemonTea", log_path);
+    spdlog::info("LemonTea bootstrap: pid={}, cwd='{}', config='{}'",
+                 ::getpid(), fs::current_path().string(), fs::absolute(config_path).string());
     spdlog::info("LemonTea starting...");
 
     signal(SIGINT, signalHandler);
@@ -92,6 +93,13 @@ int main(int argc, char* argv[]) {
         spdlog::error("LemonTea initialization failed");
         return 1;
     }
+
+    spdlog::info("LemonTea config summary: tcp_port={}, http_port={}, udp_port={}, plugins_dir='{}', frontend_plugins_dir='{}'",
+                 config.get<int>("tcp_port", tea::DEFAULT_TCP_PORT),
+                 config.get<int>("http_port", tea::DEFAULT_HTTP_PORT),
+                 config.get<int>("udp_port", tea::DEFAULT_UDP_BASE_PORT + 1),
+                 config.get<std::string>("plugins_dir", "plugins"),
+                 config.get<std::string>("frontend_plugins_dir", "frontend_plugins"));
 
     // Start HTTP API
     uint16_t http_port = config.get<int>("http_port", tea::DEFAULT_HTTP_PORT);

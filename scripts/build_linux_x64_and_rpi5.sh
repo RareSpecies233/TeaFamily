@@ -84,6 +84,56 @@ cp "$PROJECT_ROOT/LemonTea/config.json" "$LINUX_DIST/config/LemonTea.json"
 cp "$PROJECT_ROOT/GreenTea/config.json" "$RPI5_DIST/config/GreenTea.json"
 cp "$PROJECT_ROOT/HoneyTea/config.json" "$RPI5_DIST/config/HoneyTea.json"
 
+normalize_greentea_config() {
+  local path="$1"
+  local lemon_binary="$2"
+  local lemon_config="$3"
+  local honey_binary="$4"
+  local honey_config="$5"
+  local lemon_enabled="$6"
+  local honey_enabled="$7"
+
+  if [[ ! -f "$path" ]]; then
+    return
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "[WARN] python3 not found, skip GreenTea config normalization: $path" >&2
+    return
+  fi
+
+  python3 - "$path" "$lemon_binary" "$lemon_config" "$honey_binary" "$honey_config" "$lemon_enabled" "$honey_enabled" <<'PY'
+import json
+import sys
+
+cfg_path, lemon_bin, lemon_cfg, honey_bin, honey_cfg, lemon_enabled, honey_enabled = sys.argv[1:8]
+enable_lemon = lemon_enabled == '1'
+enable_honey = honey_enabled == '1'
+
+with open(cfg_path, 'r', encoding='utf-8') as f:
+    cfg = json.load(f)
+
+for proc in cfg.get('processes', []):
+    name = proc.get('name', '')
+    if name == 'LemonTea':
+        proc['binary'] = lemon_bin
+        proc['args'] = ['--config', lemon_cfg]
+        proc['working_dir'] = '.'
+        proc['auto_start'] = enable_lemon
+    elif name == 'HoneyTea':
+        proc['binary'] = honey_bin
+        proc['args'] = ['--config', honey_cfg]
+        proc['working_dir'] = '.'
+        proc['auto_start'] = enable_honey
+
+with open(cfg_path, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, ensure_ascii=False, indent=4)
+PY
+}
+
+normalize_greentea_config "$LINUX_DIST/config/GreenTea.json" "bin/LemonTea" "config/LemonTea.json" "bin/HoneyTea" "config/HoneyTea.json" "1" "0"
+normalize_greentea_config "$RPI5_DIST/config/GreenTea.json" "bin/LemonTea" "config/LemonTea.json" "bin/HoneyTea" "config/HoneyTea.json" "0" "1"
+
 echo ""
 echo "Build complete."
 echo "  Linux x64 output: $LINUX_DIST"

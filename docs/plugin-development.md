@@ -299,6 +299,26 @@ tar czf my-plugin-1.0.0.tar.gz \
 ./scripts/export_cam_lan_stream_plugin_linux_x64.sh
 ```
 
+分布式插件导出脚本支持平台选择（`linux-x64` / `rpi5` / `macos`）：
+
+```bash
+./scripts/export_ssh_plugin_linux_x64_lemon_rpi5_honey.sh \
+  --lemon-platform linux-x64 \
+  --honey-platform rpi5
+
+./scripts/export_ssh_plugin_linux_x64_lemon_rpi5_honey.sh \
+  --lemon-platform macos \
+  --honey-platform macos
+```
+
+`lemon-only` 插件可选择 LemonTea 目标平台：
+
+```bash
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform linux-x64
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform rpi5
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform macos
+```
+
 导出结果示例：`ssh-unified-macos.tar.gz`
 
 ### 安装

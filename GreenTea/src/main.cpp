@@ -1,6 +1,7 @@
 #include <csignal>
 #include <iostream>
 #include <filesystem>
+#include <unistd.h>
 #include <tea/common.h>
 #include <tea/config.h>
 #include <tea/logger.h>
@@ -35,8 +36,11 @@ int main(int argc, char* argv[]) {
 
     // Init logger
     std::string log_path = config.get<std::string>("log_path", "logs/greentea.log");
-    fs::create_directories(fs::path(log_path).parent_path());
     tea::Logger::init("GreenTea", log_path);
+    const auto config_abs = fs::absolute(config_path);
+    const auto config_dir = config_abs.parent_path();
+    spdlog::info("GreenTea bootstrap: pid={}, cwd='{}', config='{}'",
+                 ::getpid(), fs::current_path().string(), config_abs.string());
     spdlog::info("GreenTea starting...");
 
     // Setup signal handlers
@@ -46,7 +50,7 @@ int main(int argc, char* argv[]) {
 
     // Create watchdog
     Watchdog watchdog;
-    watchdog.loadConfig(config);
+    watchdog.loadConfig(config, config_dir.string());
 
     // Create updater
     uint16_t update_port = config.get<int>("listen_port", tea::DEFAULT_GREENTEA_PORT);

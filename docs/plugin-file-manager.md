@@ -20,6 +20,20 @@
 默认输出：
 - `dist/plugin-exports/file-manager/file-manager-unified-lemon-linux-x64-honey-rpi5.tar.gz`
 
+可选平台导出：
+```bash
+./scripts/export_file_manager_plugin_linux_x64_lemon_rpi5_honey.sh \
+  --lemon-platform linux-x64 \
+  --honey-platform rpi5
+
+./scripts/export_file_manager_plugin_linux_x64_lemon_rpi5_honey.sh \
+  --lemon-platform macos \
+  --honey-platform macos
+```
+
+包名会随平台变化，例如：
+- `file-manager-unified-lemon-macos-honey-macos.tar.gz`
+
 ## 安装步骤
 1. 在 OrangeTea 的“统一插件管理台”上传 `file-manager-unified-macos.tar.gz`。
 2. 预览信息确认后执行安装，系统会按 `distributed` 自动分发到 LemonTea 与在线 HoneyTea 节点。

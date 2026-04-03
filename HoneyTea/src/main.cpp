@@ -77,8 +77,9 @@ int main(int argc, char* argv[]) {
     }
 
     std::string log_path = config.get<std::string>("log_path", "logs/honeytea.log");
-    fs::create_directories(fs::path(log_path).parent_path());
     tea::Logger::init("HoneyTea", log_path);
+    spdlog::info("HoneyTea bootstrap: pid={}, cwd='{}', config='{}'",
+                 ::getpid(), fs::current_path().string(), fs::absolute(config_path).string());
     spdlog::info("HoneyTea starting...");
 
     signal(SIGINT, signalHandler);
@@ -94,6 +95,14 @@ int main(int argc, char* argv[]) {
         spdlog::error("HoneyTea initialization failed");
         return 1;
     }
+
+    spdlog::info("HoneyTea config summary: server={}:{}, udp_port={}, plugins_dir='{}', heartbeat_interval_sec={}, reconnect_interval_sec={}",
+                 config.get<std::string>("server_host", "127.0.0.1"),
+                 config.get<int>("server_port", tea::DEFAULT_TCP_PORT),
+                 config.get<int>("udp_port", tea::DEFAULT_UDP_BASE_PORT),
+                 config.get<std::string>("plugins_dir", "plugins"),
+                 config.get<int>("heartbeat_interval_sec", 5),
+                 config.get<int>("reconnect_interval_sec", 3));
 
     honey.run();
 

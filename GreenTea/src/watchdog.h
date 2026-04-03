@@ -24,6 +24,7 @@ public:
         // Runtime state
         pid_t pid = 0;
         int parent_guard_fd = -1;
+        int output_fd = -1;
         bool running = false;
         int restart_count = 0;
         int64_t last_start_time = 0;
@@ -34,7 +35,7 @@ public:
     Watchdog();
     ~Watchdog();
 
-    bool loadConfig(const tea::Config& config);
+    bool loadConfig(const tea::Config& config, const std::string& config_base_dir = ".");
     void start();
     void stop();
 
@@ -52,9 +53,11 @@ public:
 
 private:
     void monitorLoop();
+    void outputLoop();
     bool launchProcess(WatchedProcess& proc);
     bool killProcess(WatchedProcess& proc, int timeout_ms = 5000);
     void closeParentGuardFd(WatchedProcess& proc);
+    void closeOutputFd(WatchedProcess& proc);
 
     mutable std::mutex mutex_;
     std::map<std::string, WatchedProcess> processes_;
@@ -62,4 +65,6 @@ private:
 
     std::atomic<bool> running_{false};
     std::thread monitor_thread_;
+    std::thread output_thread_;
+    std::map<std::string, std::string> output_line_buffers_;
 };

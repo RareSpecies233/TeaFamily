@@ -29,6 +29,17 @@
 默认输出：
 - `dist/plugin-exports/cam-lan-stream/cam-lan-stream-unified-lemon-linux-x64.tar.gz`
 
+## 导出（可选目标平台）
+可通过参数选择 LemonTea 目标平台：`linux-x64` / `rpi5` / `macos`
+
+```bash
+# LemonTea 运行在树莓派5
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform rpi5
+
+# LemonTea 运行在 macOS
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform macos
+```
+
 ## 安装步骤
 1. 在 OrangeTea 的“统一插件管理台”上传统一包。
 2. 预览信息确认后执行安装。
@@ -68,6 +79,55 @@
 - `POST /api/publish-frame`：上传 JPEG 帧
 - `GET /api/frame/{deviceId}/{cameraId}`：读取实时帧
 - `GET /healthz`：健康检查
+
+## 外置 API（推荐给第三方应用接入）
+为避免耦合 OrangeTea 页面逻辑，插件提供了稳定的外置 API：
+
+- `GET /api/public/status`：获取服务状态和设备快照
+- `GET /api/public/devices`：获取设备列表和摄像头元数据
+- `GET /api/public/devices/{deviceId}/cameras`：获取指定设备摄像头列表
+- `GET /api/public/frame/{deviceId}/{cameraId}`：获取 JPEG 实时帧
+- `GET /api/public/frame/{deviceId}/{cameraId}/base64`：获取 Base64 帧
+- `GET /api/public/docs`：机器可读 API 文档
+
+### JavaScript 示例
+```javascript
+const apiBase = 'http://127.0.0.1:19731/api/public'
+
+const devicesResp = await fetch(apiBase + '/devices')
+const devices = (await devicesResp.json()).devices || []
+
+const deviceId = devices[0]?.device_id
+const cameraId = devices[0]?.cameras?.[0]?.camera_id
+
+const frameUrl = apiBase + '/frame/' + encodeURIComponent(deviceId) + '/' + encodeURIComponent(cameraId)
+document.querySelector('#preview').src = frameUrl
+```
+
+### Python 示例
+```python
+import requests
+
+api_base = 'http://127.0.0.1:19731/api/public'
+devices = requests.get(api_base + '/devices', timeout=5).json().get('devices', [])
+
+device_id = devices[0]['device_id']
+camera_id = devices[0]['cameras'][0]['camera_id']
+
+resp = requests.get(api_base + f'/frame/{device_id}/{camera_id}/base64', timeout=5)
+payload = resp.json()
+print('mime:', payload.get('mime'))
+print('base64 length:', len(payload.get('frame_base64', '')))
+```
+
+### curl 示例
+```bash
+curl -s http://127.0.0.1:19731/api/public/status
+curl -s http://127.0.0.1:19731/api/public/devices
+curl -s http://127.0.0.1:19731/api/public/docs
+```
+
+说明：OrangeTea 的摄像头插件页面已经内置上述 API 接入说明和示例代码，便于你直接复制使用。
 
 ## 注意事项
 - 移动浏览器调用摄像头通常要求 HTTPS 或可信局域网环境。

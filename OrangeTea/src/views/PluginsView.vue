@@ -50,68 +50,68 @@
 
       <el-table :data="pluginRows" stripe v-loading="loading" empty-text="暂无插件数据" size="small">
         <el-table-column prop="name" label="插件" min-width="140" />
-          <el-table-column prop="version" label="版本" width="90" />
 
-          <el-table-column label="类型" width="100">
+        <el-table-column label="运行开关" min-width="360">
           <template #default="{ row }">
-            <el-tag size="small" type="warning">{{ pluginTypeLabel(row.pluginType) }}</el-tag>
-          </template>
-        </el-table-column>
+            <div class="switch-panel">
+              <div class="switch-item">
+                <span class="switch-label">
+                  <i class="state-dot" :class="localIndicatorClass(row)" />
+                  LemonTea
+                </span>
+                <el-tooltip
+                  effect="dark"
+                  placement="top"
+                  :content="localUnavailableTip(row)"
+                  :disabled="!isLocalSwitchDisabled(row)"
+                >
+                  <span class="switch-wrap">
+                    <el-switch
+                      :model-value="row.localState === 'running'"
+                      :disabled="isLocalSwitchDisabled(row)"
+                      inline-prompt
+                      active-text="运行"
+                      inactive-text="停止"
+                      active-color="#21a366"
+                      inactive-color="#d9534f"
+                      @change="onLocalSwitch(row, Boolean($event))"
+                    />
+                  </span>
+                </el-tooltip>
+              </div>
 
-        <el-table-column label="LemonTea" width="100">
-          <template #default="{ row }">
-            <el-tag :type="localStateType(row.localState)" size="small">
-              {{ row.localInstalled ? row.localState : '未安装' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="HoneyTea" width="100">
-          <template #default="{ row }">
-            <el-tag :type="remoteStateType(row.remoteState, row.remoteInstalled)" size="small">
-              {{ remoteStateLabel(row) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <!-- 已移除“前端页面”列；界面仅在操作按钮上保留“打开页面”入口 -->
-
-        <el-table-column label="操作" min-width="360">
-          <template #default="{ row }">
-            <div class="actions">
-              <el-button
-                size="small"
-                :type="row.localState === 'running' ? 'warning' : 'success'"
-                class="action-btn"
-                @click="toggleLocal(row)"
-                :disabled="!row.localInstalled"
-              >
-                {{ row.localState === 'running' ? '停止服务端' : '启动服务端' }}
-              </el-button>
-
-              <el-button
-                size="small"
-                :type="row.remoteState === 'running' ? 'warning' : 'success'"
-                class="action-btn"
-                @click="toggleRemote(row)"
-                :disabled="!row.remoteInstalled || !row.remoteNodeId"
-              >
-                {{ row.remoteState === 'running' ? '停止远端' : '启动远端' }}
-              </el-button>
-
-              <el-button
-                size="small"
-                class="action-btn"
-                @click="openPlugin(row.name)"
-                :disabled="!row.frontendInstalled"
-              >
-                打开页面
-              </el-button>
-
-              <el-button size="small" type="danger" class="action-btn" @click="deleteUnified(row)">
-                统一删除
-              </el-button>
+              <div class="switch-item">
+                <span class="switch-label">
+                  <i class="state-dot" :class="remoteIndicatorClass(row)" />
+                  HoneyTea
+                </span>
+                <el-tooltip
+                  effect="dark"
+                  placement="top"
+                  :content="remoteUnavailableTip(row)"
+                  :disabled="!isRemoteSwitchDisabled(row)"
+                >
+                  <span class="switch-wrap">
+                    <el-switch
+                      :model-value="row.remoteState === 'running'"
+                      :disabled="isRemoteSwitchDisabled(row)"
+                      inline-prompt
+                      active-text="运行"
+                      inactive-text="停止"
+                      active-color="#21a366"
+                      inactive-color="#d9534f"
+                      @change="onRemoteSwitch(row, Boolean($event))"
+                    />
+                  </span>
+                </el-tooltip>
+              </div>
             </div>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="详情" width="110" align="center">
+          <template #default="{ row }">
+            <el-button size="small" @click="openDetail(row)">详情</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -156,6 +156,43 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="detailVisible" title="插件详情" width="560px">
+      <template v-if="detailRow">
+        <el-descriptions border :column="1" size="small">
+          <el-descriptions-item label="插件名称">{{ detailRow.name }}</el-descriptions-item>
+          <el-descriptions-item label="版本">{{ detailRow.version }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{ pluginTypeLabel(detailRow.pluginType) }}</el-descriptions-item>
+          <el-descriptions-item label="描述">{{ detailRow.description || '暂无描述' }}</el-descriptions-item>
+          <el-descriptions-item label="前端页面">
+            {{ detailRow.frontendInstalled ? '已安装' : '未安装' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="LemonTea 开关状态">
+            {{ localSwitchStatusText(detailRow) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="HoneyTea 开关状态">
+            {{ remoteSwitchStatusText(detailRow) }}
+          </el-descriptions-item>
+        </el-descriptions>
+      </template>
+
+      <template #footer>
+        <el-button @click="detailVisible = false">关闭</el-button>
+        <el-button
+          @click="detailRow && openPlugin(detailRow.name)"
+          :disabled="!detailRow?.frontendInstalled"
+        >
+          打开插件界面
+        </el-button>
+        <el-button
+          type="danger"
+          @click="detailRow && deleteUnified(detailRow)"
+          :disabled="!detailRow"
+        >
+          删除插件
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -172,6 +209,7 @@ interface ClientPluginInfo {
   version?: string
   state?: string
   plugin_type?: string
+  description?: string
 }
 
 interface ClientInfo {
@@ -185,6 +223,7 @@ interface ClientInfo {
 interface UnifiedPluginRow {
   name: string
   version: string
+  description: string
   pluginType: string
   localInstalled: boolean
   localState: string
@@ -216,6 +255,8 @@ const installing = ref(false)
 const confirmVisible = ref(false)
 const selectedPackage = ref<File | null>(null)
 const previewInfo = ref<PluginPreviewInfo | null>(null)
+const detailVisible = ref(false)
+const detailRow = ref<UnifiedPluginRow | null>(null)
 
 const connectedClients = computed(() => clients.value.filter((c) => c.connected))
 const primaryClient = computed(() => connectedClients.value[0] || null)
@@ -225,7 +266,7 @@ const pluginRows = computed<UnifiedPluginRow[]>(() => {
   const allNames = new Set<string>()
   const localMap = new Map(pluginStore.localPlugins.map((p) => [p.name, p]))
   const frontendMap = new Map(pluginStore.frontendPlugins.map((p) => [p.name, p]))
-  const remoteMap = new Map<string, { state: string; version?: string; pluginType?: string }>()
+  const remoteMap = new Map<string, { state: string; version?: string; pluginType?: string; description?: string }>()
 
   const remotePlugins = primaryClient.value?.plugins || []
 
@@ -239,6 +280,7 @@ const pluginRows = computed<UnifiedPluginRow[]>(() => {
       state: remote.state || 'unknown',
       version: remote.version,
       pluginType: remote.plugin_type,
+      description: remote.description,
     })
   }
 
@@ -251,6 +293,7 @@ const pluginRows = computed<UnifiedPluginRow[]>(() => {
       return {
         name,
         version: local?.version || frontend?.version || remote?.version || '-',
+        description: local?.description || frontend?.description || remote?.description || '',
         pluginType: local?.plugin_type || remote?.pluginType || 'distributed',
         localInstalled: Boolean(local),
         localState: local?.state || 'not-installed',
@@ -297,26 +340,71 @@ function noHoneyWarning(type?: string) {
   return '当前没有在线 HoneyTea，确认后仍会安装 LemonTea 与前端，HoneyTea 侧会标记未完成。'
 }
 
-function localStateType(state: string) {
-  if (state === 'running') return 'success'
-  if (state === 'stopped') return 'info'
-  if (state === 'crashed') return 'danger'
-  return 'warning'
+function isLocalSwitchDisabled(row: UnifiedPluginRow) {
+  return !row.localInstalled
 }
 
-function remoteStateType(state: string, installed: boolean) {
-  if (!primaryClient.value) return 'info'
-  if (!installed) return 'warning'
-  if (state === 'running') return 'success'
-  if (state === 'stopped') return 'info'
-  if (state === 'crashed') return 'danger'
-  return 'warning'
+function isRemoteSwitchDisabled(row: UnifiedPluginRow) {
+  if (!row.remoteNodeId) return true
+  return !row.remoteInstalled
 }
 
-function remoteStateLabel(row: UnifiedPluginRow) {
-  if (!primaryClient.value) return '未连接'
-  if (!row.remoteInstalled) return '未安装'
-  return row.remoteState
+function localUnavailableTip(row: UnifiedPluginRow) {
+  if (row.localInstalled) return ''
+  if (row.pluginType === 'honey-only') {
+    return '该插件仅安装在 HoneyTea，LemonTea 开关不可用'
+  }
+  return 'LemonTea 端未安装该插件'
+}
+
+function remoteUnavailableTip(row: UnifiedPluginRow) {
+  if (!row.remoteNodeId) {
+    return '当前没有在线 HoneyTea，无法操作远端开关'
+  }
+  if (row.remoteInstalled) {
+    return ''
+  }
+  if (row.pluginType === 'lemon-only') {
+    return '该插件仅安装在 LemonTea，HoneyTea 开关不可用'
+  }
+  return 'HoneyTea 端未安装该插件'
+}
+
+function stateClass(state: string, installed: boolean) {
+  if (!installed) return 'state-unavailable'
+  if (state === 'running') return 'state-running'
+  if (state === 'crashed') return 'state-crashed'
+  return 'state-stopped'
+}
+
+function localIndicatorClass(row: UnifiedPluginRow) {
+  return stateClass(row.localState, row.localInstalled)
+}
+
+function remoteIndicatorClass(row: UnifiedPluginRow) {
+  return stateClass(row.remoteState, row.remoteInstalled && Boolean(row.remoteNodeId))
+}
+
+function localSwitchStatusText(row: UnifiedPluginRow) {
+  if (!row.localInstalled) {
+    return row.pluginType === 'honey-only' ? '不可用（仅 HoneyTea 安装）' : '未安装'
+  }
+  return row.localState === 'running' ? '运行中' : row.localState
+}
+
+function remoteSwitchStatusText(row: UnifiedPluginRow) {
+  if (!row.remoteNodeId) {
+    return '不可用（HoneyTea 未连接）'
+  }
+  if (!row.remoteInstalled) {
+    return row.pluginType === 'lemon-only' ? '不可用（仅 LemonTea 安装）' : '未安装'
+  }
+  return row.remoteState === 'running' ? '运行中' : row.remoteState
+}
+
+function openDetail(row: UnifiedPluginRow) {
+  detailRow.value = row
+  detailVisible.value = true
 }
 
 function formatList(items?: string[]) {
@@ -391,20 +479,13 @@ async function stopLocal(name: string) {
   }
 }
 
-async function toggleLocal(row: UnifiedPluginRow) {
-  if (!row.localInstalled) return
-  if (row.localState === 'running') {
-    try {
-      await stopLocal(row.name)
-    } catch {
-      ElMessage.error('停止失败')
-    }
+async function onLocalSwitch(row: UnifiedPluginRow, enabled: boolean) {
+  if (isLocalSwitchDisabled(row)) return
+
+  if (enabled) {
+    await startLocal(row.name)
   } else {
-    try {
-      await startLocal(row.name)
-    } catch {
-      ElMessage.error('启动失败')
-    }
+    await stopLocal(row.name)
   }
 }
 
@@ -430,20 +511,13 @@ async function stopRemote(row: UnifiedPluginRow) {
   }
 }
 
-async function toggleRemote(row: UnifiedPluginRow) {
-  if (!row.remoteInstalled || !row.remoteNodeId) return
-  if (row.remoteState === 'running') {
-    try {
-      await stopRemote(row)
-    } catch {
-      ElMessage.error('远端停止失败')
-    }
+async function onRemoteSwitch(row: UnifiedPluginRow, enabled: boolean) {
+  if (isRemoteSwitchDisabled(row)) return
+
+  if (enabled) {
+    await startRemote(row)
   } else {
-    try {
-      await startRemote(row)
-    } catch {
-      ElMessage.error('远端启动失败')
-    }
+    await stopRemote(row)
   }
 }
 
@@ -492,6 +566,10 @@ async function deleteUnified(row: UnifiedPluginRow) {
     ElMessage.warning(failures.join('；'))
   } else {
     ElMessage.success(`插件 ${row.name} 已统一删除`)
+    if (detailRow.value?.name === row.name) {
+      detailVisible.value = false
+      detailRow.value = null
+    }
   }
 }
 
@@ -588,6 +666,21 @@ watch(
   }
 )
 
+watch(
+  pluginRows,
+  (rows) => {
+    if (!detailRow.value) return
+    const latest = rows.find((row) => row.name === detailRow.value?.name)
+    if (latest) {
+      detailRow.value = latest
+    } else {
+      detailRow.value = null
+      detailVisible.value = false
+    }
+  },
+  { deep: true }
+)
+
 onMounted(refreshAll)
 </script>
 
@@ -665,26 +758,55 @@ onMounted(refreshAll)
   color: #6e5d3f;
 }
 
-.actions {
+.switch-panel {
   display: flex;
-  flex-wrap: nowrap;
-  gap: 6px;
+  gap: 12px;
   align-items: center;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: auto;
+  justify-content: flex-start;
 }
 
-.action-btn {
-  flex: 1 1 1px;
-  min-width: 72px;
-  max-width: 110px;
-  padding: 5px 8px;
-  font-size: 11px;
-  white-space: nowrap;
-  justify-content: center;
-  box-sizing: border-box;
-  text-overflow: ellipsis;
-  overflow: hidden;
+.switch-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 130px;
+}
+
+.switch-wrap {
+  display: inline-flex;
+}
+
+.switch-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #5f4c2c;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.8);
+}
+
+.state-running {
+  background: #21a366;
+}
+
+.state-stopped {
+  background: #d9534f;
+}
+
+.state-crashed {
+  background: #dc3545;
+}
+
+.state-unavailable {
+  background: #9aa0a6;
 }
 
 .el-table th,
@@ -707,10 +829,8 @@ onMounted(refreshAll)
   .el-table-column {
     font-size: 12px;
   }
-  .action-btn {
-    min-width: 64px;
-    max-width: 90px;
-    font-size: 10px;
+  .switch-item {
+    min-width: 116px;
   }
 }
 
@@ -726,11 +846,8 @@ onMounted(refreshAll)
   .hero-actions .el-upload {
     width: auto;
   }
-  .el-table-column:nth-child(3),
-  .el-table-column:nth-child(4),
-  .el-table-column:nth-child(5) {
-    min-width: 80px;
-    max-width: 100px;
+  .switch-panel {
+    flex-wrap: wrap;
   }
 }
 

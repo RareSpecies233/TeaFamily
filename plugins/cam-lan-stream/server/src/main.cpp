@@ -179,6 +179,35 @@ bool decodeBase64(const std::string& in, std::vector<unsigned char>& out) {
     return true;
 }
 
+std::string encodeBase64(const std::vector<unsigned char>& in) {
+  static const char* chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+  std::string out;
+  out.reserve(((in.size() + 2) / 3) * 4);
+
+  int val = 0;
+  int valb = -6;
+  for (unsigned char c : in) {
+    val = (val << 8) + c;
+    valb += 8;
+    while (valb >= 0) {
+      out.push_back(chars[(val >> valb) & 0x3F]);
+      valb -= 6;
+    }
+  }
+
+  if (valb > -6) {
+    out.push_back(chars[((val << 8) >> (valb + 8)) & 0x3F]);
+  }
+
+  while (out.size() % 4 != 0) {
+    out.push_back('=');
+  }
+
+  return out;
+}
+
 bool decodeImageDataUrl(const std::string& data_url, std::vector<unsigned char>& jpeg, std::string& error) {
     static const std::string prefix = "data:image/jpeg;base64,";
     if (data_url.rfind(prefix, 0) != 0) {
@@ -236,6 +265,92 @@ json snapshotDevices() {
     return devices;
 }
 
+bool readFrameSnapshot(const std::string& raw_device_id,
+             const std::string& raw_camera_id,
+             std::vector<unsigned char>& frame,
+             uint64_t& last_frame_ms,
+             std::string& error) {
+  const std::string device_id = normalizeId(raw_device_id, std::string());
+  const std::string camera_id = normalizeId(raw_camera_id, std::string());
+
+  if (device_id.empty() || camera_id.empty()) {
+    error = "invalid device or camera id";
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(g_data_mutex);
+  const auto dev_it = g_devices.find(device_id);
+  if (dev_it == g_devices.end()) {
+    error = "device not found";
+    return false;
+  }
+
+  const auto cam_it = dev_it->second.cameras.find(camera_id);
+  if (cam_it == dev_it->second.cameras.end() || cam_it->second.jpeg_frame.empty()) {
+    error = "camera frame not found";
+    return false;
+  }
+
+  frame = cam_it->second.jpeg_frame;
+  last_frame_ms = cam_it->second.last_frame_ms;
+  return true;
+}
+
+json buildExternalApiDoc() {
+  const std::string origin = effectivePublicOrigin();
+  const std::string public_base = origin + "/api/public";
+
+  return {
+    {"plugin", "cam-lan-stream"},
+    {"version", "1.0"},
+    {"description", "External camera data APIs for LAN applications"},
+    {"base_url", public_base},
+    {"endpoints", json::array({
+      {
+        {"method", "GET"},
+        {"path", "/api/public/status"},
+        {"description", "Get server info and current device snapshot"}
+      },
+      {
+        {"method", "GET"},
+        {"path", "/api/public/devices"},
+        {"description", "List online devices and camera metadata"}
+      },
+      {
+        {"method", "GET"},
+        {"path", "/api/public/devices/{deviceId}/cameras"},
+        {"description", "List camera metadata for a specific device"}
+      },
+      {
+        {"method", "GET"},
+        {"path", "/api/public/frame/{deviceId}/{cameraId}"},
+        {"description", "Fetch latest frame as image/jpeg"}
+      },
+      {
+        {"method", "GET"},
+        {"path", "/api/public/frame/{deviceId}/{cameraId}/base64"},
+        {"description", "Fetch latest frame as Base64 JSON payload"}
+      },
+      {
+        {"method", "GET"},
+        {"path", "/api/public/docs"},
+        {"description", "Machine-readable API document"}
+      }
+    })},
+    {"examples", {
+      {"javascript", {
+        {"status", public_base + "/status"},
+        {"devices", public_base + "/devices"},
+        {"frame", public_base + "/frame/{deviceId}/{cameraId}"}
+      }},
+      {"python", {
+        {"devices", public_base + "/devices"},
+        {"frame_base64", public_base + "/frame/{deviceId}/{cameraId}/base64"}
+      }}
+    }}
+  };
+}
+
 json buildStatusResponse(const std::string& request_id) {
     json payload = {
         {"action", "status_result"},
@@ -243,8 +358,10 @@ json buildStatusResponse(const std::string& request_id) {
         {"server", {
             {"bind_host", g_bind_host},
             {"port", g_listen_port},
-          {"public_origin", effectivePublicOrigin()},
-          {"mobile_page_url", effectivePublicOrigin() + "/"}
+            {"public_origin", effectivePublicOrigin()},
+            {"mobile_page_url", effectivePublicOrigin() + "/"},
+            {"external_api_base", effectivePublicOrigin() + "/api/public"},
+            {"external_api_docs", effectivePublicOrigin() + "/api/public/docs"}
         }},
         {"devices", snapshotDevices()}
     };
@@ -619,6 +736,62 @@ void configureHttpRoutes(httplib::Server& server) {
         res.set_content(json{{"devices", snapshotDevices()}}.dump(), "application/json");
     });
 
+    server.Get("/api/public/status", [](const httplib::Request&, httplib::Response& res) {
+      res.set_content(json{
+        {"success", true},
+        {"server", {
+          {"bind_host", g_bind_host},
+          {"port", g_listen_port},
+          {"public_origin", effectivePublicOrigin()},
+          {"mobile_page_url", effectivePublicOrigin() + "/"}
+        }},
+        {"devices", snapshotDevices()}
+      }.dump(), "application/json");
+    });
+
+    server.Get("/api/public/devices", [](const httplib::Request&, httplib::Response& res) {
+      res.set_content(json{{"success", true}, {"devices", snapshotDevices()}}.dump(), "application/json");
+    });
+
+    server.Get(R"(/api/public/devices/([^/]+)/cameras)", [](const httplib::Request& req, httplib::Response& res) {
+      const std::string device_id = normalizeId(req.matches[1].str(), std::string());
+      if (device_id.empty()) {
+        res.status = 400;
+        res.set_content(R"({"success":false,"error":"invalid device id"})", "application/json");
+        return;
+      }
+
+      json cameras = json::array();
+      {
+        std::lock_guard<std::mutex> lock(g_data_mutex);
+        auto dev_it = g_devices.find(device_id);
+        if (dev_it == g_devices.end()) {
+          res.status = 404;
+          res.set_content(R"({"success":false,"error":"device not found"})", "application/json");
+          return;
+        }
+
+        for (const auto& [cam_id, cam] : dev_it->second.cameras) {
+          cameras.push_back({
+            {"camera_id", cam_id},
+            {"camera_label", cam.camera_label},
+            {"last_frame_ms", cam.last_frame_ms}
+          });
+        }
+      }
+
+      std::sort(cameras.begin(), cameras.end(), [](const json& a, const json& b) {
+        return a.value("camera_id", std::string()) < b.value("camera_id", std::string());
+      });
+
+      res.set_content(json{{"success", true}, {"device_id", device_id}, {"cameras", cameras}}.dump(),
+              "application/json");
+    });
+
+    server.Get("/api/public/docs", [](const httplib::Request&, httplib::Response& res) {
+      res.set_content(buildExternalApiDoc().dump(2), "application/json");
+    });
+
     server.Post("/api/register", [](const httplib::Request& req, httplib::Response& res) {
         try {
             auto body = json::parse(req.body);
@@ -697,31 +870,51 @@ void configureHttpRoutes(httplib::Server& server) {
     });
 
     server.Get(R"(/api/frame/([^/]+)/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
-        const std::string device_id = normalizeId(req.matches[1].str(), std::string());
-        const std::string camera_id = normalizeId(req.matches[2].str(), std::string());
-
-        std::vector<unsigned char> frame;
-        {
-            std::lock_guard<std::mutex> lock(g_data_mutex);
-            const auto dev_it = g_devices.find(device_id);
-            if (dev_it == g_devices.end()) {
-                res.status = 404;
-                res.set_content(R"({"error":"device not found"})", "application/json");
-                return;
-            }
-
-            const auto cam_it = dev_it->second.cameras.find(camera_id);
-            if (cam_it == dev_it->second.cameras.end() || cam_it->second.jpeg_frame.empty()) {
-                res.status = 404;
-                res.set_content(R"({"error":"camera frame not found"})", "application/json");
-                return;
-            }
-
-            frame = cam_it->second.jpeg_frame;
-        }
+      std::vector<unsigned char> frame;
+      uint64_t last_frame_ms = 0;
+      std::string error;
+      if (!readFrameSnapshot(req.matches[1].str(), req.matches[2].str(), frame, last_frame_ms, error)) {
+        res.status = 404;
+        res.set_content(json{{"error", error}}.dump(), "application/json");
+        return;
+      }
 
         res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.set_header("X-Frame-Timestamp", std::to_string(last_frame_ms));
         res.set_content(reinterpret_cast<const char*>(frame.data()), static_cast<size_t>(frame.size()), "image/jpeg");
+    });
+
+    server.Get(R"(/api/public/frame/([^/]+)/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
+      std::vector<unsigned char> frame;
+      uint64_t last_frame_ms = 0;
+      std::string error;
+      if (!readFrameSnapshot(req.matches[1].str(), req.matches[2].str(), frame, last_frame_ms, error)) {
+        res.status = 404;
+        res.set_content(json{{"success", false}, {"error", error}}.dump(), "application/json");
+        return;
+      }
+
+      res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.set_header("X-Frame-Timestamp", std::to_string(last_frame_ms));
+      res.set_content(reinterpret_cast<const char*>(frame.data()), static_cast<size_t>(frame.size()), "image/jpeg");
+    });
+
+    server.Get(R"(/api/public/frame/([^/]+)/([^/]+)/base64)", [](const httplib::Request& req, httplib::Response& res) {
+      std::vector<unsigned char> frame;
+      uint64_t last_frame_ms = 0;
+      std::string error;
+      if (!readFrameSnapshot(req.matches[1].str(), req.matches[2].str(), frame, last_frame_ms, error)) {
+        res.status = 404;
+        res.set_content(json{{"success", false}, {"error", error}}.dump(), "application/json");
+        return;
+      }
+
+      res.set_content(json{
+        {"success", true},
+        {"mime", "image/jpeg"},
+        {"updated_at_ms", last_frame_ms},
+        {"frame_base64", encodeBase64(frame)}
+      }.dump(), "application/json");
     });
 
     server.Get("/healthz", [](const httplib::Request&, httplib::Response& res) {
@@ -850,8 +1043,10 @@ int main() {
         {"server", {
             {"bind_host", g_bind_host},
             {"port", g_listen_port},
-          {"public_origin", effectivePublicOrigin()},
-          {"mobile_page_url", effectivePublicOrigin() + "/"}
+            {"public_origin", effectivePublicOrigin()},
+            {"mobile_page_url", effectivePublicOrigin() + "/"},
+            {"external_api_base", effectivePublicOrigin() + "/api/public"},
+            {"external_api_docs", effectivePublicOrigin() + "/api/public/docs"}
         }}
     });
 

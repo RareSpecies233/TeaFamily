@@ -38,8 +38,16 @@ function ensureStyle() {
     .cam-stream-empty { color: #a2b4c8; padding: 20px; text-align: center; }
     .cam-stream-mobile-link { word-break: break-all; color: #1f66ad; }
     .cam-stream-err { border: 1px solid #f2c8c8; background: #fff1f1; color: #8c3030; border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }
+    .cam-stream-api-list { margin: 6px 0 12px; padding-left: 18px; color: #36526d; }
+    .cam-stream-api-list li { margin: 4px 0; }
+    .cam-stream-api-list code { color: #134978; font-weight: 600; }
+    .cam-stream-code-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .cam-stream-code-card { border: 1px solid #d9e7f8; border-radius: 10px; background: #f6fbff; overflow: hidden; }
+    .cam-stream-code-card h4 { margin: 0; padding: 8px 10px; font-size: 13px; color: #21486f; background: #e9f4ff; border-bottom: 1px solid #d1e2f4; }
+    .cam-stream-code-card pre { margin: 0; padding: 10px; font-size: 12px; line-height: 1.45; overflow: auto; color: #1f2f41; }
     @media (max-width: 980px) {
       .cam-stream-grid { grid-template-columns: 1fr; }
+      .cam-stream-code-grid { grid-template-columns: 1fr; }
     }
   `
   document.head.appendChild(style)
@@ -115,6 +123,18 @@ export function mount(container, ctx = {}) {
         }
         return `${serviceOrigin.value}/`
       })
+      const externalApiBase = computed(() => {
+        if (serverInfo.value?.external_api_base) {
+          return serverInfo.value.external_api_base
+        }
+        return `${serviceOrigin.value}/api/public`
+      })
+      const externalApiDocs = computed(() => {
+        if (serverInfo.value?.external_api_docs) {
+          return serverInfo.value.external_api_docs
+        }
+        return `${externalApiBase.value}/docs`
+      })
 
       const selectedDeviceObj = computed(() =>
         devices.value.find((item) => item.device_id === selectedDevice.value) || null
@@ -131,6 +151,48 @@ export function mount(container, ctx = {}) {
         }
         return `${serviceOrigin.value}/api/frame/${encodeURIComponent(selectedDevice.value)}/${encodeURIComponent(selectedCamera.value)}?t=${frameTick.value}`
       })
+
+      const sampleDeviceId = computed(() => selectedDevice.value || 'mobile-demo')
+      const sampleCameraId = computed(() => selectedCamera.value || 'camera-0')
+
+      const jsExample = computed(() =>
+        [
+          `const apiBase = '${externalApiBase.value}'`,
+          "",
+          "const devicesResp = await fetch(apiBase + '/devices')",
+          "const devices = (await devicesResp.json()).devices || []",
+          "const deviceId = devices[0]?.device_id",
+          "const cameraId = devices[0]?.cameras?.[0]?.camera_id",
+          "",
+          "const frameUrl = apiBase + '/frame/' + encodeURIComponent(deviceId) + '/' + encodeURIComponent(cameraId)",
+          "document.querySelector('#preview').src = frameUrl",
+        ].join('\n')
+      )
+
+      const pythonExample = computed(() =>
+        [
+          'import requests',
+          '',
+          `api_base = '${externalApiBase.value}'`,
+          "devices = requests.get(api_base + '/devices', timeout=5).json().get('devices', [])",
+          "device_id = devices[0]['device_id']",
+          "camera_id = devices[0]['cameras'][0]['camera_id']",
+          "resp = requests.get(api_base + f'/frame/{device_id}/{camera_id}/base64', timeout=5)",
+          "payload = resp.json()",
+          "print('mime:', payload.get('mime'))",
+          "print('base64 length:', len(payload.get('frame_base64', '')))",
+        ].join('\n')
+      )
+
+      const curlExample = computed(() =>
+        [
+          `curl -s '${externalApiBase.value}/devices'`,
+          '',
+          `curl -s '${externalApiBase.value}/frame/${encodeURIComponent(sampleDeviceId.value)}/${encodeURIComponent(sampleCameraId.value)}/base64'`,
+          '',
+          `curl -s '${externalApiDocs.value}'`,
+        ].join('\n')
+      )
 
       function ensureSelection() {
         if (!devices.value.length) {
@@ -237,11 +299,16 @@ export function mount(container, ctx = {}) {
         devices,
         serviceOrigin,
         mobilePageUrl,
+        externalApiBase,
+        externalApiDocs,
         selectedDevice,
         selectedCamera,
         selectedDeviceObj,
         selectedCameraObj,
         frameUrl,
+        jsExample,
+        pythonExample,
+        curlExample,
         refreshAll,
         setDevice,
         setCamera,
@@ -312,6 +379,37 @@ export function mount(container, ctx = {}) {
             </div>
           </section>
         </div>
+
+        <section class="cam-stream-card" style="margin-top: 12px;">
+          <h3>外置 API 接入文档</h3>
+          <div class="cam-stream-kv">
+            <div><b>API 基地址</b><span>{{ externalApiBase }}</span></div>
+            <div><b>文档地址</b><a class="cam-stream-mobile-link" :href="externalApiDocs" target="_blank">{{ externalApiDocs }}</a></div>
+          </div>
+
+          <ul class="cam-stream-api-list">
+            <li><code>GET /api/public/status</code> 获取服务状态与设备快照</li>
+            <li><code>GET /api/public/devices</code> 获取设备和摄像头列表</li>
+            <li><code>GET /api/public/devices/{deviceId}/cameras</code> 获取设备摄像头详情</li>
+            <li><code>GET /api/public/frame/{deviceId}/{cameraId}</code> 获取 JPEG 实时帧</li>
+            <li><code>GET /api/public/frame/{deviceId}/{cameraId}/base64</code> 获取 Base64 帧</li>
+          </ul>
+
+          <div class="cam-stream-code-grid">
+            <article class="cam-stream-code-card">
+              <h4>JavaScript 示例</h4>
+              <pre>{{ jsExample }}</pre>
+            </article>
+            <article class="cam-stream-code-card">
+              <h4>Python 示例</h4>
+              <pre>{{ pythonExample }}</pre>
+            </article>
+            <article class="cam-stream-code-card">
+              <h4>curl 示例</h4>
+              <pre>{{ curlExample }}</pre>
+            </article>
+          </div>
+        </section>
       </section>
     `,
   })

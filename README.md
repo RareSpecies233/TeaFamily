@@ -106,9 +106,27 @@ macOS 插件导出脚本：
 ./scripts/export_monitor_plugin_linux_x64_lemon_rpi5_honey.sh
 ```
 
+导出脚本支持平台选择（`linux-x64` / `rpi5` / `macos`）：
+```bash
+./scripts/export_ssh_plugin_linux_x64_lemon_rpi5_honey.sh \
+      --lemon-platform linux-x64 \
+      --honey-platform rpi5
+
+./scripts/export_ssh_plugin_linux_x64_lemon_rpi5_honey.sh \
+      --lemon-platform macos \
+      --honey-platform macos
+```
+
 LemonTea-only 插件导出脚本（Linux x64）：
 ```bash
 ./scripts/export_cam_lan_stream_plugin_linux_x64.sh
+```
+
+LemonTea-only 导出同样支持平台选择：
+```bash
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform linux-x64
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform rpi5
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform macos
 ```
 
 脚本会导出统一安装包（例如 `ssh-unified-macos.tar.gz`），用于 OrangeTea 的统一插件安装入口。
@@ -157,20 +175,20 @@ npm run dev
       - UDP 基础端口：`9530`
 
 ### 直接运行（调试 / 快速验证）
-在目标主机上进入 `dist` 目录并直接运行二进制（示例把日志重定向到 `logs/`）：
+在目标主机上进入 `dist` 目录并直接运行二进制：
 
 ```bash
 cd /opt/teafamily
 mkdir -p logs
 # 在服务器上运行 LemonTea（HTTP 服务）
-./bin/LemonTea > logs/lemontea.log 2>&1 &
+./bin/LemonTea --config config/LemonTea.json &
 # 可选：运行 GreenTea 守护进程（监控/更新）
-./bin/GreenTea > logs/greentea.log 2>&1 &
+./bin/GreenTea --config config/GreenTea.json &
 # 在每台客户端（例如 Raspberry Pi）上运行 HoneyTea
-./bin/HoneyTea > logs/honeytea.log 2>&1 &
+./bin/HoneyTea --config config/HoneyTea.json &
 
-# 查看日志
-tail -f logs/lemontea.log
+# 查看最新日志（日志文件名为 程序名_日期_时间.log）
+ls -lt logs
 ```
 
 ### 配置文件位置与运行（重要）
@@ -187,16 +205,16 @@ tail -f logs/lemontea.log
 
 ```bash
 cd /opt/teafamily
-./bin/LemonTea --config config/LemonTea.json > logs/lemontea.log 2>&1 &
-./bin/GreenTea --config config/GreenTea.json > logs/greentea.log 2>&1 &
-./bin/HoneyTea --config config/HoneyTea.json > logs/honeytea.log 2>&1 &
+./bin/LemonTea --config config/LemonTea.json &
+./bin/GreenTea --config config/GreenTea.json &
+./bin/HoneyTea --config config/HoneyTea.json &
 ```
 
 如果你必须从 `dist/bin` 目录直接运行，可使用相对路径：
 
 ```bash
 cd /opt/teafamily/bin
-./LemonTea --config ../config/LemonTea.json > ../logs/lemontea.log 2>&1 &
+./LemonTea --config ../config/LemonTea.json &
 ```
 
 也可以使用符号链接或复制单个 `config.json` 到当前工作目录，但要注意不要覆盖不同组件的配置文件：
