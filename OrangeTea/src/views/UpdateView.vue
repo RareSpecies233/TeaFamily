@@ -79,9 +79,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { ElMessage, type UploadInstance } from 'element-plus'
 import * as api from '@/api'
+import { useConnectionStore } from '@/stores/connection'
 
 const lemonUploadRef = ref<UploadInstance>()
 const honeyUploadRef = ref<UploadInstance>()
@@ -89,11 +90,30 @@ const lemonUploading = ref(false)
 const honeyUploading = ref(false)
 const selectedClient = ref('')
 const clients = ref<any[]>([])
+const connectionStore = useConnectionStore()
 
 async function fetchClients() {
   try {
     const resp = await api.getClients()
     clients.value = resp.data.clients || []
+
+    if (connectionStore.selectedHoneyNodeId) {
+      const hasPreferred = clients.value.some(
+        (c: any) => c.node_id === connectionStore.selectedHoneyNodeId
+      )
+      if (!hasPreferred) {
+        connectionStore.setSelectedHoneyNodeId('')
+      }
+    }
+
+    if (connectionStore.selectedHoneyNodeId) {
+      selectedClient.value = connectionStore.selectedHoneyNodeId
+      return
+    }
+
+    const firstConnected = clients.value.find((c: any) => c.connected)
+    selectedClient.value = firstConnected?.node_id || clients.value[0]?.node_id || ''
+    connectionStore.setSelectedHoneyNodeId(selectedClient.value)
   } catch (e) {
     console.error(e)
   }
@@ -135,6 +155,20 @@ async function uploadHoneyTea() {
     honeyUploading.value = false
   }
 }
+
+watch(selectedClient, (value) => {
+  connectionStore.setSelectedHoneyNodeId(value || '')
+})
+
+watch(
+  () => connectionStore.selectedHoneyNodeId,
+  (value) => {
+    if (!value) return
+    if (selectedClient.value !== value) {
+      selectedClient.value = value
+    }
+  }
+)
 
 onMounted(fetchClients)
 </script>

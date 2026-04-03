@@ -259,7 +259,16 @@ const detailVisible = ref(false)
 const detailRow = ref<UnifiedPluginRow | null>(null)
 
 const connectedClients = computed(() => clients.value.filter((c) => c.connected))
-const primaryClient = computed(() => connectedClients.value[0] || null)
+const primaryClient = computed(() => {
+  const preferredNodeId = connectionStore.selectedHoneyNodeId
+  if (preferredNodeId) {
+    const preferred = connectedClients.value.find((c) => c.node_id === preferredNodeId)
+    if (preferred) {
+      return preferred
+    }
+  }
+  return connectedClients.value[0] || null
+})
 const loading = computed(() => pluginStore.loading || refreshing.value)
 
 const pluginRows = computed<UnifiedPluginRow[]>(() => {
@@ -431,6 +440,20 @@ async function fetchClients() {
   )
 
   clients.value = detailed
+
+  if (connectionStore.selectedHoneyNodeId) {
+    const exists = detailed.some((c) => c.node_id === connectionStore.selectedHoneyNodeId)
+    if (!exists) {
+      connectionStore.setSelectedHoneyNodeId('')
+    }
+  }
+
+  if (!connectionStore.selectedHoneyNodeId) {
+    const firstConnected = detailed.find((c) => c.connected)
+    if (firstConnected) {
+      connectionStore.setSelectedHoneyNodeId(firstConnected.node_id)
+    }
+  }
 }
 
 async function refreshAll() {

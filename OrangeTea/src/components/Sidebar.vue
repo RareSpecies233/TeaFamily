@@ -101,26 +101,43 @@
 
       <el-tooltip
         v-if="collapsed"
-        :content="`LemonTea：${statusLabel}（点击配置）`"
+        :content="connectionTooltip"
         placement="right"
       >
         <button type="button" class="connection-mini" @click="openConfig">
-          <el-icon v-if="connectionStore.connected" class="status-icon online">
-            <CircleCheckFilled />
-          </el-icon>
-          <el-icon v-else class="status-icon offline">
-            <CircleCloseFilled />
-          </el-icon>
+          <div class="mini-status-group">
+            <span class="mini-status-pill" title="LemonTea">
+              <span class="mini-status-dot" :class="connectionStore.connected ? 'online' : 'offline'" />
+              <span class="mini-status-text">L</span>
+            </span>
+            <span class="mini-status-pill" title="HoneyTea">
+              <span class="mini-status-dot" :class="honeyOnline ? 'online' : 'offline'" />
+              <span class="mini-status-text">H</span>
+            </span>
+          </div>
         </button>
       </el-tooltip>
 
       <template v-else>
         <div class="connection-card" @click="openConfig">
-          <div class="connection-top">
-            <span class="connection-label">LemonTea 连接</span>
-            <el-tag :type="statusType" size="small">{{ statusLabel }}</el-tag>
+          <div class="connection-row">
+            <div class="connection-top">
+              <span class="connection-label">LemonTea</span>
+              <el-tag :type="lemonStatusType" size="small">{{ lemonStatusLabel }}</el-tag>
+            </div>
+            <p class="server-url">{{ displayServerUrl }}</p>
           </div>
-          <p class="server-url">{{ displayServerUrl }}</p>
+
+          <div class="connection-divider" />
+
+          <div class="connection-row">
+            <div class="connection-top">
+              <span class="connection-label">HoneyTea</span>
+              <el-tag :type="honeyStatusType" size="small">{{ honeyStatusLabel }}</el-tag>
+            </div>
+            <p class="server-url">{{ honeySummaryText }}</p>
+          </div>
+
           <p v-if="connectionStore.error" class="connection-error">{{ connectionStore.error }}</p>
         </div>
 
@@ -147,15 +164,43 @@
       </template>
     </div>
 
-    <el-dialog v-model="configVisible" title="LemonTea 连接配置" width="460px">
+    <el-dialog v-model="configVisible" title="连接配置" width="520px">
       <el-form label-position="top">
-        <el-form-item label="服务器地址">
+        <el-form-item label="LemonTea HTTP 地址">
           <el-input
             v-model="serverAddress"
             placeholder="例如：127.0.0.1:9528"
             :disabled="connectionStore.connecting"
           />
         </el-form-item>
+
+        <el-form-item label="HoneyTea 目标节点">
+          <el-select
+            v-model="honeyNodeId"
+            clearable
+            filterable
+            placeholder="自动选择首个在线节点"
+            :disabled="!connectionStore.connected || connectionStore.connecting || connectionStore.refreshingHoneyClients"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="client in connectionStore.honeyClients"
+              :key="client.node_id"
+              :label="formatHoneyOption(client)"
+              :value="client.node_id"
+            />
+          </el-select>
+          <p class="form-hint">用于插件管理和版本更新的默认 HoneyTea 目标节点。</p>
+        </el-form-item>
+
+        <el-alert
+          v-if="connectionStore.connected && !connectionStore.honeyClients.length"
+          title="尚未检测到 HoneyTea 节点，确认 HoneyTea 已连接到当前 LemonTea。"
+          type="info"
+          :closable="false"
+          style="margin-bottom: 10px"
+        />
+
         <el-alert
           v-if="connectionStore.error"
           :title="connectionStore.error"
@@ -166,6 +211,13 @@
 
       <template #footer>
         <el-button @click="configVisible = false">取消</el-button>
+        <el-button
+          :loading="connectionStore.refreshingHoneyClients"
+          :disabled="!connectionStore.connected || connectionStore.connecting"
+          @click="refreshHoneyList"
+        >
+          刷新 HoneyTea
+        </el-button>
         <el-button type="primary" :loading="connectionStore.connecting" @click="saveAndConnect">
           保存并连接
         </el-button>
@@ -175,7 +227,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useConnectionStore } from '@/stores/connection'
 import { usePluginStore } from '@/stores/plugins'
@@ -188,10 +240,43 @@ const collapsed = ref(localStorage.getItem('tea_sidebar_collapsed') === '1')
 const multiWindowMode = ref(localStorage.getItem('tea_plugin_multi_window') === '1')
 const configVisible = ref(false)
 const serverAddress = ref(connectionStore.serverUrl || 'http://127.0.0.1:9528')
+const honeyNodeId = ref(connectionStore.selectedHoneyNodeId || '')
+let honeyPollTimer: number | null = null
 
-const statusType = computed(() => (connectionStore.connected ? 'success' : 'info'))
-const statusLabel = computed(() => (connectionStore.connected ? '在线' : '离线'))
+const lemonStatusType = computed(() => (connectionStore.connected ? 'success' : 'info'))
+const lemonStatusLabel = computed(() => (connectionStore.connected ? '在线' : '离线'))
 const displayServerUrl = computed(() => connectionStore.serverUrl || '未设置服务器地址')
+const honeyOnline = computed(() => connectionStore.honeyConnectedCount > 0)
+const honeyStatusType = computed(() => (honeyOnline.value ? 'success' : 'info'))
+const honeyStatusLabel = computed(() => {
+  const selected = connectionStore.selectedHoneyClient
+  if (!connectionStore.connected) return '未连接'
+  if (connectionStore.refreshingHoneyClients && !selected) return '刷新中'
+  if (selected) {
+    return selected.connected ? '在线' : '离线'
+  }
+  if (connectionStore.honeyConnectedCount > 0) {
+    return `在线 ${connectionStore.honeyConnectedCount} 个`
+  }
+  return '离线'
+})
+const honeySummaryText = computed(() => {
+  const selected = connectionStore.selectedHoneyClient
+  if (selected) {
+    const status = selected.connected ? '在线' : '离线'
+    return `${selected.node_id} · ${selected.address}:${selected.port}（${status}）`
+  }
+  if (!connectionStore.connected) {
+    return '需先连接 LemonTea'
+  }
+  if (connectionStore.honeyConnectedCount > 0) {
+    return `已连接 ${connectionStore.honeyConnectedCount} 个节点，未指定默认节点`
+  }
+  return '未检测到 HoneyTea'
+})
+const connectionTooltip = computed(
+  () => `LemonTea：${lemonStatusLabel.value} ｜ HoneyTea：${honeyStatusLabel.value}（点击配置）`
+)
 const activeMenuIndex = computed(() => {
   if (route.path === '/plugins') return 'plugins'
   if (route.path === '/update') return 'update'
@@ -230,17 +315,45 @@ async function syncPluginEntries() {
   await Promise.allSettled([pluginStore.fetchPlugins(), pluginStore.fetchFrontendPlugins()])
 }
 
+function stopHoneyPolling() {
+  if (honeyPollTimer !== null) {
+    window.clearInterval(honeyPollTimer)
+    honeyPollTimer = null
+  }
+}
+
+function startHoneyPolling() {
+  stopHoneyPolling()
+  if (!connectionStore.connected) {
+    return
+  }
+  honeyPollTimer = window.setInterval(() => {
+    connectionStore.refreshHoneyClients()
+  }, 5000)
+}
+
 onMounted(() => {
   syncPluginEntries()
+  if (connectionStore.connected) {
+    connectionStore.refreshHoneyClients()
+  }
+  startHoneyPolling()
+})
+
+onBeforeUnmount(() => {
+  stopHoneyPolling()
 })
 
 watch(
   () => connectionStore.connected,
   (connected) => {
     if (connected) {
+      connectionStore.refreshHoneyClients()
+      startHoneyPolling()
       syncPluginEntries()
       return
     }
+    stopHoneyPolling()
     pluginStore.localPlugins = []
     pluginStore.frontendPlugins = []
   }
@@ -251,6 +364,15 @@ watch(
   (value) => {
     if (!configVisible.value) {
       serverAddress.value = value || 'http://127.0.0.1:9528'
+    }
+  }
+)
+
+watch(
+  () => connectionStore.selectedHoneyNodeId,
+  (value) => {
+    if (!configVisible.value) {
+      honeyNodeId.value = value || ''
     }
   }
 )
@@ -322,23 +444,44 @@ function handleDisconnect() {
   connectionStore.disconnect()
 }
 
-function openConfig() {
+async function openConfig() {
   serverAddress.value = connectionStore.serverUrl || serverAddress.value
+  honeyNodeId.value = connectionStore.selectedHoneyNodeId || ''
+  if (connectionStore.connected) {
+    await connectionStore.refreshHoneyClients()
+  }
   configVisible.value = true
 }
 
 async function quickConnect() {
+  connectionStore.setSelectedHoneyNodeId(honeyNodeId.value)
   const ok = await connectionStore.connect(serverAddress.value)
   if (ok) {
+    await connectionStore.refreshHoneyClients()
     await syncPluginEntries()
   }
 }
 
+async function refreshHoneyList() {
+  await connectionStore.refreshHoneyClients()
+}
+
 async function saveAndConnect() {
+  connectionStore.setSelectedHoneyNodeId(honeyNodeId.value)
   const ok = await connectionStore.connect(serverAddress.value)
   if (!ok) return
+  await connectionStore.refreshHoneyClients()
   await syncPluginEntries()
   configVisible.value = false
+}
+
+function formatHoneyOption(client: {
+  node_id: string
+  address: string
+  port: number
+  connected: boolean
+}) {
+  return `${client.node_id} (${client.address}:${client.port}) ${client.connected ? '在线' : '离线'}`
 }
 
 function shortPluginLabel(value: string) {
@@ -568,6 +711,20 @@ function shortPluginLabel(value: string) {
   padding: 10px;
   cursor: pointer;
   background: rgba(255, 252, 245, 0.78);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.connection-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.connection-divider {
+  height: 1px;
+  background: #e8ddcb;
 }
 
 .connection-top {
@@ -649,16 +806,48 @@ function shortPluginLabel(value: string) {
   flex-shrink: 0;
 }
 
-.status-icon {
-  font-size: 24px;
+.connection-mini:hover {
+  border-color: #d6c29e;
+  background: #fffdf7;
+}
+
+.mini-status-group {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.mini-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.mini-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+
+.mini-status-dot.online {
+  background: #389d6f;
+}
+
+.mini-status-dot.offline {
+  background: #b58f4f;
+}
+
+.mini-status-text {
+  font-size: 11px;
+  color: #6d5937;
+  font-weight: 700;
   line-height: 1;
 }
 
-.status-icon.online {
-  color: #369f6d;
-}
-
-.status-icon.offline {
-  color: #9f7c42;
+.form-hint {
+  margin: 6px 0 0;
+  color: #8c7757;
+  font-size: 12px;
 }
 </style>
