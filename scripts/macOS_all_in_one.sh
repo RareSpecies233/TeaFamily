@@ -24,10 +24,11 @@ ask() {
     while true; do
         read -rp "$prompt [$default]: " ans
         ans="${ans:-$default}"
-        case "${ans,,}" in
-            y|yes) return 0 ;; 
-            n|no) return 1 ;; 
-            *) echo "请输入 y 或 n（大小写均可）" ;; 
+        ans="$(echo "$ans" | tr '[:upper:]' '[:lower:]')"
+        case "$ans" in
+            y|yes|1) return 0 ;; 
+            n|no|2) return 1 ;; 
+            *) echo "请输入 y/n/1/2" ;; 
         esac
     done
 }
