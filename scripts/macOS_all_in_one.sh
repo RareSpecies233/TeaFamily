@@ -89,11 +89,12 @@ export_plugins_to() {
 
     mkdir -p "$PROJECT_ROOT/dist/plugin-exports"
 
-    local plugins=(ssh file-manager monitor cam-lan-stream)
+        local plugins=(ssh file-manager monitor dual-slider cam-lan-stream)
     local invokers=(
       export_ssh_plugin_linux_x64_lemon_rpi5_honey.sh
       export_file_manager_plugin_linux_x64_lemon_rpi5_honey.sh
       export_monitor_plugin_linux_x64_lemon_rpi5_honey.sh
+            export_dual_slider_plugin_linux_x64_lemon_rpi5_honey.sh
       export_cam_lan_stream_plugin_linux_x64.sh
     )
 

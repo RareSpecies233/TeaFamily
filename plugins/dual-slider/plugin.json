@@ -1,0 +1,13 @@
+{
+  "name": "dual-slider",
+  "version": "1.0.0",
+  "description": "双滑块控制与数值共享插件",
+  "author": "TeaFamily",
+  "plugin_type": "distributed",
+  "depends_on": [],
+  "capabilities": ["control", "realtime", "shared-values"],
+  "communication": "stdio",
+  "has_frontend": true,
+  "server_binary": "server/tea-plugin-dual-slider-server",
+  "client_binary": "client/tea-plugin-dual-slider-client"
+}

@@ -82,6 +82,7 @@ cmake --build . --config Release -j
 - **SSH插件** - 远程终端访问
 - **文件管理插件** - 远程文件浏览与管理
 - **监控插件** - 系统资源监控与图表展示
+- **双滑块控制插件** - 双通道实时控制与只读展示，可通过 API 获取当前值
 - **局域网摄像头串流插件** - 移动端摄像头采集与 OrangeTea 实时预览（仅 LemonTea 安装）
 
 详见 [插件开发文档](docs/plugin-development.md)
@@ -90,6 +91,7 @@ cmake --build . --config Release -j
 - [SSH 插件](docs/plugin-ssh.md)
 - [文件管理插件](docs/plugin-file-manager.md)
 - [监控插件](docs/plugin-monitor.md)
+- [双滑块控制插件](docs/plugin-dual-slider.md)
 - [局域网摄像头串流插件](docs/plugin-cam-lan-stream.md)
 
 LemonTea HTTP API：
@@ -100,6 +102,7 @@ macOS 插件导出脚本：
 ./scripts/macOS_export_ssh_plugin.sh
 ./scripts/macOS_export_file_manager_plugin.sh
 ./scripts/macOS_export_monitor_plugin.sh
+./scripts/macOS_export_dual_slider_plugin.sh
 ./scripts/macOS_export_cam_lan_stream_plugin.sh
 ```
 
@@ -108,6 +111,7 @@ macOS 插件导出脚本：
 ./scripts/export_ssh_plugin_linux_x64_lemon_rpi5_honey.sh
 ./scripts/export_file_manager_plugin_linux_x64_lemon_rpi5_honey.sh
 ./scripts/export_monitor_plugin_linux_x64_lemon_rpi5_honey.sh
+./scripts/export_dual_slider_plugin_linux_x64_lemon_rpi5_honey.sh
 ```
 
 导出脚本支持平台选择（`linux-x64` / `rpi5` / `macos`）：

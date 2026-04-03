@@ -1,0 +1,9 @@
+{
+  "name": "dual-slider",
+  "version": "1.0.0",
+  "entry": "index.js",
+  "title": "双滑块控制",
+  "icon": "setting",
+  "route": "/plugin/dual-slider",
+  "description": "双滑块实时控制与只读展示"
+}

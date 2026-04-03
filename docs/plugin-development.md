@@ -291,11 +291,13 @@ tar czf my-plugin-1.0.0.tar.gz \
 ./scripts/macOS_export_ssh_plugin.sh
 ./scripts/macOS_export_file_manager_plugin.sh
 ./scripts/macOS_export_monitor_plugin.sh
+./scripts/macOS_export_dual_slider_plugin.sh
 ./scripts/macOS_export_cam_lan_stream_plugin.sh
 
 ./scripts/export_ssh_plugin_linux_x64_lemon_rpi5_honey.sh
 ./scripts/export_file_manager_plugin_linux_x64_lemon_rpi5_honey.sh
 ./scripts/export_monitor_plugin_linux_x64_lemon_rpi5_honey.sh
+./scripts/export_dual_slider_plugin_linux_x64_lemon_rpi5_honey.sh
 ./scripts/export_cam_lan_stream_plugin_linux_x64.sh
 ```
 
