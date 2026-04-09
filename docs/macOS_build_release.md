@@ -110,7 +110,11 @@ mkdir -p logs
 每个脚本会生成一个统一包：
 - 统一插件包：`<plugin>-unified-macos.tar.gz`（包含运行时与前端，供 OrangeTea 统一安装入口使用）
 
-说明：`cam-lan-stream` 为 `lemon-only` 插件，统一安装时只会安装到 LemonTea（以及前端页面），不会要求 HoneyTea 运行时。
+说明：`cam-lan-stream` 现为 `distributed` 插件，统一安装时会同时分发 LemonTea 运行时、HoneyTea 运行时和 OrangeTea 前端页面。若你的实际部署是 LemonTea 在 macOS、HoneyTea 在树莓派5，请改用：
+
+```bash
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform macos --honey-platform rpi5
+```
 
 ## 常见问题与排查
 

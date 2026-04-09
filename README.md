@@ -83,7 +83,7 @@ cmake --build . --config Release -j
 - **文件管理插件** - 远程文件浏览与管理
 - **监控插件** - 系统资源监控与图表展示
 - **双滑块控制插件** - 双通道实时控制与只读展示，可通过 API 获取当前值
-- **局域网摄像头串流插件** - 移动端摄像头采集与 OrangeTea 实时预览（仅 LemonTea 安装）
+- **树莓派摄像头串流插件** - HoneyTea 控制树莓派摄像头，通过 MediaMTX 同时输出 WebRTC 预览与 YOLO 裸 H.264 TCP 流
 
 详见 [插件开发文档](docs/plugin-development.md)
 
@@ -112,6 +112,7 @@ macOS 插件导出脚本：
 ./scripts/export_file_manager_plugin_linux_x64_lemon_rpi5_honey.sh
 ./scripts/export_monitor_plugin_linux_x64_lemon_rpi5_honey.sh
 ./scripts/export_dual_slider_plugin_linux_x64_lemon_rpi5_honey.sh
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform linux-x64 --honey-platform rpi5
 ```
 
 导出脚本支持平台选择（`linux-x64` / `rpi5` / `macos`）：
@@ -125,16 +126,17 @@ macOS 插件导出脚本：
       --honey-platform macos
 ```
 
-LemonTea-only 插件导出脚本（Linux x64）：
+摄像头插件导出脚本同样支持平台选择（`linux-x64` / `rpi5` / `macos`）：
 ```bash
-./scripts/export_cam_lan_stream_plugin_linux_x64.sh
-```
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh \
+      --lemon-platform macos \
+      --honey-platform rpi5
 
-LemonTea-only 导出同样支持平台选择：
-```bash
-./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform linux-x64
-./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform rpi5
-./scripts/export_cam_lan_stream_plugin_linux_x64.sh --lemon-platform macos
+./scripts/export_cam_lan_stream_plugin_linux_x64.sh \
+      --lemon-platform linux-x64 \
+      --honey-platform rpi5
+
+./scripts/macOS_export_cam_lan_stream_plugin.sh
 ```
 
 脚本会导出统一安装包（例如 `ssh-unified-macos.tar.gz`），用于 OrangeTea 的统一插件安装入口。

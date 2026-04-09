@@ -1,135 +1,33 @@
-#ifdef TEA_HTTPLIB_HEADER_FILE
-#include TEA_HTTPLIB_HEADER_FILE
-#else
-#include <httplib.h>
-#endif
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
-#include <algorithm>
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <cctype>
-#include <cstdlib>
-#include <filesystem>
-#include <iostream>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
-
 using json = nlohmann::json;
-namespace fs = std::filesystem;
 
 namespace {
 
-struct CameraState {
-    std::string camera_id;
-    std::string camera_label;
-    std::vector<unsigned char> jpeg_frame;
-    uint64_t last_frame_ms = 0;
-};
-
-struct DeviceState {
-    std::string device_id;
-    std::string device_name;
-    std::string user_agent;
-    std::string remote_ip;
-    uint64_t last_seen_ms = 0;
-    std::unordered_map<std::string, CameraState> cameras;
-};
+constexpr const char* kPluginName = "cam-lan-stream";
 
 std::mutex g_out_mutex;
-std::mutex g_data_mutex;
-std::unordered_map<std::string, DeviceState> g_devices;
-
-std::unique_ptr<httplib::Server> g_http_server;
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-std::unique_ptr<httplib::SSLServer> g_https_server;
-#endif
-std::thread g_http_thread;
-std::atomic<bool> g_running{true};
-
-std::string g_bind_host = "0.0.0.0";
-std::string g_public_host = "127.0.0.1";
-std::string g_public_origin;
-std::string g_https_cert_path;
-std::string g_https_key_path;
-int g_listen_port = 19731;
-bool g_use_https = false;
-
-std::string effectiveScheme() {
-  return g_use_https ? "https" : "http";
-}
-
-std::string effectivePublicOrigin() {
-  if (!g_public_origin.empty()) {
-    return g_public_origin;
-  }
-  return effectiveScheme() + "://" + g_public_host + ":" + std::to_string(g_listen_port);
-}
-
-httplib::Server* activeServer() {
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-  if (g_use_https && g_https_server) {
-    return g_https_server.get();
-  }
-#endif
-  return g_http_server.get();
-}
-
-uint64_t nowMs() {
-    return static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count());
-}
-
-std::string trim(const std::string& value) {
-    size_t begin = 0;
-    while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin]))) {
-        begin++;
-    }
-    size_t end = value.size();
-    while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
-        end--;
-    }
-    return value.substr(begin, end - begin);
-}
-
-std::string normalizeId(const std::string& value, const std::string& fallback) {
-    std::string out;
-    out.reserve(value.size());
-    for (char c : value) {
-        const auto uc = static_cast<unsigned char>(c);
-        if (std::isalnum(uc) || c == '-' || c == '_' || c == '.') {
-            out.push_back(c);
-        }
-    }
-    if (out.empty()) {
-        return fallback;
-    }
-    return out;
-}
-
-bool parsePort(const char* value, int& out_port) {
-    if (!value || !*value) {
-        return false;
-    }
-    try {
-        const int parsed = std::stoi(value);
-        if (parsed < 1 || parsed > 65535) {
-            return false;
-        }
-        out_port = parsed;
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
+std::mutex g_state_mutex;
+json g_last_status = {
+    {"action", "status_result"},
+    {"plugin", kPluginName},
+    {"state", "stopped"},
+    {"service", {{"active", false}}},
+    {"camera_config", json::object()},
+    {"endpoints", json::object()},
+    {"system", json::object()},
+    {"last_error", ""},
+    {"node_id", ""}
+};
+uint64_t g_status_version = 0;
+std::string g_default_target_node;
 
 void sendMessage(const json& payload) {
     std::lock_guard<std::mutex> lock(g_out_mutex);
@@ -137,936 +35,262 @@ void sendMessage(const json& payload) {
     std::cout.flush();
 }
 
-std::string inferRemoteIp(const httplib::Request& req) {
-    auto forwarded = req.get_header_value("X-Forwarded-For");
-    if (!forwarded.empty()) {
-        auto comma = forwarded.find(',');
-        return trim(forwarded.substr(0, comma));
-    }
-    return req.remote_addr;
-}
-
-bool decodeBase64(const std::string& in, std::vector<unsigned char>& out) {
-    static const std::string chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    std::array<int, 256> table{};
-    table.fill(-1);
-    for (size_t i = 0; i < chars.size(); ++i) {
-        table[static_cast<unsigned char>(chars[i])] = static_cast<int>(i);
-    }
-
-    int val = 0;
-    int valb = -8;
-    for (unsigned char c : in) {
-        if (std::isspace(c)) {
-            continue;
-        }
-        if (c == '=') {
-            break;
-        }
-        const int decoded = table[c];
-        if (decoded < 0) {
-            return false;
-        }
-        val = (val << 6) + decoded;
-        valb += 6;
-        if (valb >= 0) {
-            out.push_back(static_cast<unsigned char>((val >> valb) & 0xFF));
-            valb -= 8;
-        }
-    }
-    return true;
-}
-
-std::string encodeBase64(const std::vector<unsigned char>& in) {
-  static const char* chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-  std::string out;
-  out.reserve(((in.size() + 2) / 3) * 4);
-
-  int val = 0;
-  int valb = -6;
-  for (unsigned char c : in) {
-    val = (val << 8) + c;
-    valb += 8;
-    while (valb >= 0) {
-      out.push_back(chars[(val >> valb) & 0x3F]);
-      valb -= 6;
-    }
-  }
-
-  if (valb > -6) {
-    out.push_back(chars[((val << 8) >> (valb + 8)) & 0x3F]);
-  }
-
-  while (out.size() % 4 != 0) {
-    out.push_back('=');
-  }
-
-  return out;
-}
-
-bool decodeImageDataUrl(const std::string& data_url, std::vector<unsigned char>& jpeg, std::string& error) {
-    static const std::string prefix = "data:image/jpeg;base64,";
-    if (data_url.rfind(prefix, 0) != 0) {
-        error = "image_data_url must start with data:image/jpeg;base64,";
-        return false;
-    }
-
-    const std::string encoded = data_url.substr(prefix.size());
-    if (encoded.empty()) {
-        error = "empty image payload";
-        return false;
-    }
-
-    if (!decodeBase64(encoded, jpeg) || jpeg.empty()) {
-        error = "invalid base64 image payload";
-        return false;
-    }
-
-    return true;
-}
-
-json snapshotDevices() {
-    std::lock_guard<std::mutex> lock(g_data_mutex);
-
-    json devices = json::array();
-    for (const auto& it : g_devices) {
-        const auto& dev = it.second;
-        json cameras = json::array();
-        for (const auto& cam_it : dev.cameras) {
-            const auto& cam = cam_it.second;
-            cameras.push_back({
-                {"camera_id", cam.camera_id},
-                {"camera_label", cam.camera_label},
-                {"last_frame_ms", cam.last_frame_ms}
-            });
-        }
-
-        std::sort(cameras.begin(), cameras.end(), [](const json& a, const json& b) {
-            return a.value("camera_id", std::string()) < b.value("camera_id", std::string());
-        });
-
-        devices.push_back({
-            {"device_id", dev.device_id},
-            {"device_name", dev.device_name},
-            {"remote_ip", dev.remote_ip},
-            {"last_seen_ms", dev.last_seen_ms},
-            {"cameras", cameras}
-        });
-    }
-
-    std::sort(devices.begin(), devices.end(), [](const json& a, const json& b) {
-        return a.value("device_id", std::string()) < b.value("device_id", std::string());
-    });
-
-    return devices;
-}
-
-bool readFrameSnapshot(const std::string& raw_device_id,
-             const std::string& raw_camera_id,
-             std::vector<unsigned char>& frame,
-             uint64_t& last_frame_ms,
-             std::string& error) {
-  const std::string device_id = normalizeId(raw_device_id, std::string());
-  const std::string camera_id = normalizeId(raw_camera_id, std::string());
-
-  if (device_id.empty() || camera_id.empty()) {
-    error = "invalid device or camera id";
-    return false;
-  }
-
-  std::lock_guard<std::mutex> lock(g_data_mutex);
-  const auto dev_it = g_devices.find(device_id);
-  if (dev_it == g_devices.end()) {
-    error = "device not found";
-    return false;
-  }
-
-  const auto cam_it = dev_it->second.cameras.find(camera_id);
-  if (cam_it == dev_it->second.cameras.end() || cam_it->second.jpeg_frame.empty()) {
-    error = "camera frame not found";
-    return false;
-  }
-
-  frame = cam_it->second.jpeg_frame;
-  last_frame_ms = cam_it->second.last_frame_ms;
-  return true;
-}
-
-json buildExternalApiDoc() {
-  const std::string origin = effectivePublicOrigin();
-  const std::string public_base = origin + "/api/public";
-
-  return {
-    {"plugin", "cam-lan-stream"},
-    {"version", "1.0"},
-    {"description", "External camera data APIs for LAN applications"},
-    {"base_url", public_base},
-    {"endpoints", json::array({
-      {
-        {"method", "GET"},
-        {"path", "/api/public/status"},
-        {"description", "Get server info and current device snapshot"}
-      },
-      {
-        {"method", "GET"},
-        {"path", "/api/public/devices"},
-        {"description", "List online devices and camera metadata"}
-      },
-      {
-        {"method", "GET"},
-        {"path", "/api/public/devices/{deviceId}/cameras"},
-        {"description", "List camera metadata for a specific device"}
-      },
-      {
-        {"method", "GET"},
-        {"path", "/api/public/frame/{deviceId}/{cameraId}"},
-        {"description", "Fetch latest frame as image/jpeg"}
-      },
-      {
-        {"method", "GET"},
-        {"path", "/api/public/frame/{deviceId}/{cameraId}/base64"},
-        {"description", "Fetch latest frame as Base64 JSON payload"}
-      },
-      {
-        {"method", "GET"},
-        {"path", "/api/public/docs"},
-        {"description", "Machine-readable API document"}
-      }
-    })},
-    {"examples", {
-      {"javascript", {
-        {"status", public_base + "/status"},
-        {"devices", public_base + "/devices"},
-        {"frame", public_base + "/frame/{deviceId}/{cameraId}"}
-      }},
-      {"python", {
-        {"devices", public_base + "/devices"},
-        {"frame_base64", public_base + "/frame/{deviceId}/{cameraId}/base64"}
-      }}
-    }}
-  };
-}
-
-json buildStatusResponse(const std::string& request_id) {
-    json payload = {
-        {"action", "status_result"},
-        {"plugin", "cam-lan-stream"},
-        {"server", {
-            {"bind_host", g_bind_host},
-            {"port", g_listen_port},
-            {"public_origin", effectivePublicOrigin()},
-            {"mobile_page_url", effectivePublicOrigin() + "/"},
-            {"external_api_base", effectivePublicOrigin() + "/api/public"},
-            {"external_api_docs", effectivePublicOrigin() + "/api/public/docs"}
-        }},
-        {"devices", snapshotDevices()}
+json buildCapabilities() {
+    return {
+        {"action", "capabilities_result"},
+        {"plugin", kPluginName},
+        {"supported_actions", json::array({
+            "describe",
+            "discover",
+            "status",
+            "get_config",
+            "set_config",
+            "start_stream",
+            "stop_stream",
+            "restart_stream",
+            "set_public_host"
+        })},
+        {"controls", json::array({
+            "camera_id",
+            "width",
+            "height",
+            "fps",
+            "bitrate",
+            "idr_period",
+            "brightness",
+            "contrast",
+            "saturation",
+            "sharpness",
+            "exposure",
+            "awb",
+            "denoise",
+            "shutter",
+            "gain",
+            "ev",
+            "hflip",
+            "vflip",
+            "stream_path",
+            "rtsp_port",
+            "webrtc_port",
+            "webrtc_udp_port",
+            "yolo_port",
+            "public_host"
+        })},
+        {"transport", {
+            {"frontend", "MediaMTX WebRTC / WHEP"},
+            {"yolo", "Annex-B H.264 over TCP"}
+        }}
     };
+}
 
+std::string resolveTargetNode(const json& msg) {
+    const std::vector<std::string> keys = {"target_node", "node_id", "target"};
+    for (const auto& key : keys) {
+        const std::string value = msg.value(key, std::string(""));
+        if (!value.empty()) {
+            return value;
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(g_state_mutex);
+    return g_default_target_node;
+}
+
+bool isResponseAction(const std::string& action) {
+    static const std::unordered_set<std::string> actions = {
+        "status_result",
+        "config_result",
+        "capabilities_result",
+        "stream_state",
+        "stream_error",
+        "stream_warning"
+    };
+    return actions.count(action) > 0;
+}
+
+void cacheStatus(const json& msg) {
+    std::lock_guard<std::mutex> lock(g_state_mutex);
+    if (msg.contains("from_node") && msg["from_node"].is_string()) {
+        g_default_target_node = msg["from_node"].get<std::string>();
+        g_last_status["node_id"] = g_default_target_node;
+    }
+
+    const std::string action = msg.value("action", std::string(""));
+    if (action == "status_result") {
+        g_last_status = msg;
+        if (!g_default_target_node.empty() && !g_last_status.contains("node_id")) {
+            g_last_status["node_id"] = g_default_target_node;
+        }
+        ++g_status_version;
+    } else if (action == "config_result") {
+        g_last_status["camera_config"] = msg.value("camera_config", json::object());
+        if (msg.contains("state")) {
+            g_last_status["state"] = msg["state"];
+        }
+        ++g_status_version;
+    } else if (action == "stream_error") {
+        g_last_status["state"] = "error";
+        g_last_status["last_error"] = msg.value("message", std::string("unknown error"));
+        ++g_status_version;
+    }
+}
+
+json buildDiscoverResult(const std::string& request_id) {
+    std::lock_guard<std::mutex> lock(g_state_mutex);
+    auto payload = buildCapabilities();
+    payload["action"] = "discover_result";
+    payload["last_status"] = g_last_status;
+    payload["status_version"] = g_status_version;
+    payload["default_target_node"] = g_default_target_node;
     if (!request_id.empty()) {
         payload["request_id"] = request_id;
     }
-
     return payload;
 }
 
-std::string buildMobilePageHtml() {
-    return R"HTML(<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TeaFamily 局域网摄像头上报</title>
-  <style>
-    :root { --bg: #f7fbff; --card: #ffffff; --line: #d8e5f6; --text: #203247; --muted: #5f7288; --accent: #2e7dd7; }
-    * { box-sizing: border-box; }
-    body { margin: 0; padding: 14px; background: linear-gradient(160deg, #eef6ff, #f8fffb); color: var(--text); font-family: "Noto Sans SC", "PingFang SC", sans-serif; }
-    .card { max-width: 760px; margin: 0 auto; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; box-shadow: 0 10px 24px rgba(23, 63, 104, .08); }
-    h1 { margin: 0 0 10px; font-size: 20px; }
-    p { margin: 6px 0; color: var(--muted); }
-    .row { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
-    .col { flex: 1 1 220px; min-width: 220px; }
-    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-    input, select, button { width: 100%; border: 1px solid #cdddf1; border-radius: 10px; padding: 9px 10px; font-size: 14px; background: #fff; }
-    button { cursor: pointer; background: var(--accent); color: #fff; border: none; font-weight: 600; }
-    button.secondary { background: #7c8ea6; }
-    video { width: 100%; background: #0f1b29; border-radius: 10px; min-height: 220px; }
-    .status { padding: 8px 10px; border-radius: 8px; background: #edf4ff; color: #1f4776; font-size: 13px; }
-    .warn { background: #fff2dd; color: #7b4c07; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>TeaFamily 局域网摄像头上报</h1>
-    <p>选择摄像头后，页面会持续将 JPEG 帧上传到 LemonTea 插件服务。OrangeTea 可实时查看设备与画面。</p>
-    <p id="secureHint" class="status warn">检测中...</p>
-
-    <div class="row">
-      <div class="col">
-        <label>设备名称</label>
-        <input id="deviceName" placeholder="例如：Alice-iPhone" />
-      </div>
-      <div class="col">
-        <label>摄像头</label>
-        <select id="cameraSelect"></select>
-      </div>
-    </div>
-
-    <div class="row">
-      <div class="col"><button id="refreshBtn" class="secondary">刷新摄像头列表</button></div>
-      <div class="col"><button id="startBtn">开始串流</button></div>
-      <div class="col"><button id="stopBtn" class="secondary">停止串流</button></div>
-      <div class="col"><button id="compatBtn" class="secondary">启用兼容模式</button></div>
-      <div class="col"><button id="captureBtn" class="secondary">拍照并上传</button></div>
-    </div>
-    <input id="captureInput" type="file" accept="image/*" capture="environment" style="display:none" />
-
-    <video id="preview" playsinline autoplay muted></video>
-    <canvas id="canvas" width="640" height="360" style="display:none"></canvas>
-
-    <div class="row">
-      <div class="col"><div id="state" class="status">等待启动</div></div>
-      <div class="col"><div id="mode" class="status">模式: 未启动</div></div>
-      <div class="col"><div id="fps" class="status">帧率: -</div></div>
-    </div>
-  </div>
-
-  <script>
-    const deviceIdKey = 'tea_cam_stream_device_id'
-    let deviceId = localStorage.getItem(deviceIdKey)
-    if (!deviceId) {
-      deviceId = 'mobile-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
-      localStorage.setItem(deviceIdKey, deviceId)
+json buildCachedStatusResult(const std::string& request_id, const std::string& action_name) {
+    std::lock_guard<std::mutex> lock(g_state_mutex);
+    json payload = g_last_status;
+    payload["action"] = action_name;
+    if (!request_id.empty()) {
+        payload["request_id"] = request_id;
     }
-
-    const elDeviceName = document.getElementById('deviceName')
-    const elCamera = document.getElementById('cameraSelect')
-    const elState = document.getElementById('state')
-    const elSecureHint = document.getElementById('secureHint')
-    const elMode = document.getElementById('mode')
-    const elFps = document.getElementById('fps')
-    const elCompatBtn = document.getElementById('compatBtn')
-    const elCaptureBtn = document.getElementById('captureBtn')
-    const elCaptureInput = document.getElementById('captureInput')
-    const video = document.getElementById('preview')
-    const canvas = document.getElementById('canvas')
-    const ctx = canvas.getContext('2d')
-
-    let stream = null
-    let compatibilityMode = false
-    let pushTimer = null
-    let registerTimer = null
-    let frameCount = 0
-    let fpsTimer = null
-
-    function isSecureContextLike() {
-      return window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-    }
-
-    function updateSecureHint() {
-      if (isSecureContextLike()) {
-        elSecureHint.textContent = '当前环境可直接调用摄像头实时串流（HTTPS/localhost）。'
-        elSecureHint.classList.remove('warn')
-      } else {
-        elSecureHint.textContent = '当前为非 HTTPS 环境，部分浏览器会阻止摄像头实时权限。可点击“启用兼容模式”后用“拍照并上传”替代。'
-        elSecureHint.classList.add('warn')
-      }
-    }
-
-    function setState(text, warn = false) {
-      elState.textContent = text
-      elState.classList.toggle('warn', !!warn)
-    }
-
-    function setMode(text, warn = false) {
-      elMode.textContent = '模式: ' + text
-      elMode.classList.toggle('warn', !!warn)
-    }
-
-    function currentCameraLabel() {
-      const opt = elCamera.options[elCamera.selectedIndex]
-      return opt ? (opt.textContent || '') : ''
-    }
-
-    async function jsonFetch(path, body) {
-      const resp = await fetch(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!resp.ok) {
-        throw new Error('HTTP ' + resp.status)
-      }
-      return resp.json().catch(() => ({}))
-    }
-
-    async function refreshCameras() {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices()
-        const cameras = devices.filter((d) => d.kind === 'videoinput')
-        elCamera.innerHTML = cameras
-          .map((d, idx) => `<option value="${d.deviceId}">${d.label || ('摄像头 ' + (idx + 1))}</option>`)
-          .join('')
-
-        if (!elCamera.value && cameras.length > 0) {
-          elCamera.value = cameras[0].deviceId
-        }
-      } catch (e) {
-        setState('读取摄像头列表失败：' + (e.message || e), true)
-      }
-    }
-
-    async function registerDevice() {
-      const devices = await navigator.mediaDevices.enumerateDevices()
-      const cameras = devices
-        .filter((d) => d.kind === 'videoinput')
-        .map((d, idx) => ({ id: d.deviceId, label: d.label || ('摄像头 ' + (idx + 1)) }))
-
-      await jsonFetch('/api/register', {
-        device_id: deviceId,
-        device_name: (elDeviceName.value || '').trim() || navigator.userAgent,
-        cameras,
-      })
-    }
-
-    async function pushFrameLoop() {
-      if (!stream || compatibilityMode) {
-        return
-      }
-
-      try {
-        const targetWidth = 640
-        const targetHeight = 360
-        canvas.width = targetWidth
-        canvas.height = targetHeight
-        ctx.drawImage(video, 0, 0, targetWidth, targetHeight)
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.65)
-
-        await jsonFetch('/api/publish-frame', {
-          device_id: deviceId,
-          device_name: (elDeviceName.value || '').trim() || navigator.userAgent,
-          camera_id: elCamera.value,
-          camera_label: currentCameraLabel(),
-          image_data_url: dataUrl,
-        })
-
-        frameCount += 1
-      } catch (e) {
-        setState('上传帧失败：' + (e.message || e), true)
-      } finally {
-        pushTimer = setTimeout(pushFrameLoop, 220)
-      }
-    }
-
-    async function startStreaming() {
-      if (compatibilityMode) {
-        setState('当前为兼容模式，请使用“拍照并上传”')
-        setMode('兼容上传', true)
-        return
-      }
-
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setState('当前浏览器不支持摄像头接口', true)
-        return
-      }
-
-      if (stream) {
-        stopStreaming()
-      }
-
-      try {
-        const cameraId = elCamera.value
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: cameraId ? { deviceId: { exact: cameraId } } : true,
-          audio: false,
-        })
-        video.srcObject = stream
-        await video.play()
-
-        await registerDevice()
-        pushFrameLoop()
-
-        if (registerTimer) clearInterval(registerTimer)
-        registerTimer = setInterval(() => {
-          registerDevice().catch(() => {})
-        }, 3000)
-
-        if (fpsTimer) clearInterval(fpsTimer)
-        frameCount = 0
-        fpsTimer = setInterval(() => {
-          elFps.textContent = '帧率: ' + frameCount * 2 + ' FPS（近似）'
-          frameCount = 0
-        }, 2000)
-
-        setState('串流中：' + (currentCameraLabel() || elCamera.value || '默认摄像头'))
-        setMode('实时串流')
-      } catch (e) {
-        setState('启动失败：' + (e.message || e), true)
-      }
-    }
-
-    function stopStreaming() {
-      if (pushTimer) {
-        clearTimeout(pushTimer)
-        pushTimer = null
-      }
-      if (registerTimer) {
-        clearInterval(registerTimer)
-        registerTimer = null
-      }
-      if (fpsTimer) {
-        clearInterval(fpsTimer)
-        fpsTimer = null
-      }
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop())
-        stream = null
-      }
-      video.srcObject = null
-      elFps.textContent = '帧率: -'
-      setState('已停止')
-      if (!compatibilityMode) {
-        setMode('未启动')
-      }
-    }
-
-    function fileToDataUrl(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onerror = () => reject(new Error('读取图片失败'))
-        reader.onload = () => resolve(reader.result)
-        reader.readAsDataURL(file)
-      })
-    }
-
-    async function uploadCapturedFile(file) {
-      const dataUrl = await fileToDataUrl(file)
-      await jsonFetch('/api/publish-frame', {
-        device_id: deviceId,
-        device_name: (elDeviceName.value || '').trim() || navigator.userAgent,
-        camera_id: elCamera.value || 'capture-camera',
-        camera_label: currentCameraLabel() || '兼容拍照上传',
-        image_data_url: dataUrl,
-      })
-      setState('已上传拍照帧：' + new Date().toLocaleTimeString())
-      setMode('兼容上传', true)
-    }
-
-    function enableCompatibilityMode() {
-      compatibilityMode = true
-      stopStreaming()
-      setMode('兼容上传', true)
-      setState('兼容模式已开启：点击“拍照并上传”即可')
-    }
-
-    function handleCaptureFileChange(event) {
-      const input = event.target
-      const file = input.files && input.files[0]
-      if (!file) {
-        return
-      }
-      uploadCapturedFile(file)
-        .catch((e) => {
-          setState('上传拍照失败：' + (e.message || e), true)
-        })
-        .finally(() => {
-          input.value = ''
-        })
-    }
-
-    document.getElementById('refreshBtn').addEventListener('click', () => {
-      refreshCameras().then(() => registerDevice().catch(() => {}))
-    })
-    document.getElementById('startBtn').addEventListener('click', startStreaming)
-    document.getElementById('stopBtn').addEventListener('click', stopStreaming)
-    elCompatBtn.addEventListener('click', enableCompatibilityMode)
-    elCaptureBtn.addEventListener('click', () => {
-      if (!compatibilityMode) {
-        setState('请先点击“启用兼容模式”', true)
-        return
-      }
-      elCaptureInput.click()
-    })
-    elCaptureInput.addEventListener('change', handleCaptureFileChange)
-
-    window.addEventListener('beforeunload', () => {
-      stopStreaming()
-    })
-
-    ;(async () => {
-      elDeviceName.value = localStorage.getItem('tea_cam_stream_device_name') || ''
-      elDeviceName.addEventListener('change', () => {
-        localStorage.setItem('tea_cam_stream_device_name', elDeviceName.value || '')
-      })
-      updateSecureHint()
-      await refreshCameras()
-      await registerDevice().catch(() => {})
-      setState('摄像头就绪，点击“开始串流”')
-      setMode('未启动')
-
-      if (!isSecureContextLike()) {
-        enableCompatibilityMode()
-      }
-    })()
-  </script>
-</body>
-</html>)HTML";
+    return payload;
 }
 
-void configureHttpRoutes(httplib::Server& server) {
-  server.set_pre_routing_handler([](const httplib::Request& req, httplib::Response& res) {
-        res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type");
-        if (req.method == "OPTIONS") {
-            res.status = 204;
-            return httplib::Server::HandlerResponse::Handled;
-        }
-        return httplib::Server::HandlerResponse::Unhandled;
-    });
+void emitBridgeError(const std::string& request_id, const std::string& message) {
+    json payload = {
+        {"action", "error"},
+        {"plugin", kPluginName},
+        {"message", message}
+    };
+    if (!request_id.empty()) {
+        payload["request_id"] = request_id;
+    }
+    sendMessage(payload);
+}
 
-    server.Get("/", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content(buildMobilePageHtml(), "text/html; charset=utf-8");
-    });
-
-    server.Get("/api/devices", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content(json{{"devices", snapshotDevices()}}.dump(), "application/json");
-    });
-
-    server.Get("/api/public/status", [](const httplib::Request&, httplib::Response& res) {
-      res.set_content(json{
-        {"success", true},
-        {"server", {
-          {"bind_host", g_bind_host},
-          {"port", g_listen_port},
-          {"public_origin", effectivePublicOrigin()},
-          {"mobile_page_url", effectivePublicOrigin() + "/"}
-        }},
-        {"devices", snapshotDevices()}
-      }.dump(), "application/json");
-    });
-
-    server.Get("/api/public/devices", [](const httplib::Request&, httplib::Response& res) {
-      res.set_content(json{{"success", true}, {"devices", snapshotDevices()}}.dump(), "application/json");
-    });
-
-    server.Get(R"(/api/public/devices/([^/]+)/cameras)", [](const httplib::Request& req, httplib::Response& res) {
-      const std::string device_id = normalizeId(req.matches[1].str(), std::string());
-      if (device_id.empty()) {
-        res.status = 400;
-        res.set_content(R"({"success":false,"error":"invalid device id"})", "application/json");
+void forwardToHoney(const json& msg) {
+    const std::string request_id = msg.value("request_id", std::string(""));
+    const std::string target_node = resolveTargetNode(msg);
+    if (target_node.empty()) {
+        emitBridgeError(request_id, "missing target_node for HoneyTea camera control");
         return;
-      }
+    }
 
-      json cameras = json::array();
-      {
-        std::lock_guard<std::mutex> lock(g_data_mutex);
-        auto dev_it = g_devices.find(device_id);
-        if (dev_it == g_devices.end()) {
-          res.status = 404;
-          res.set_content(R"({"success":false,"error":"device not found"})", "application/json");
-          return;
-        }
+    json data = msg;
+    data.erase("target");
+    data.erase("target_node");
+    data.erase("node_id");
 
-        for (const auto& [cam_id, cam] : dev_it->second.cameras) {
-          cameras.push_back({
-            {"camera_id", cam_id},
-            {"camera_label", cam.camera_label},
-            {"last_frame_ms", cam.last_frame_ms}
-          });
-        }
-      }
-
-      std::sort(cameras.begin(), cameras.end(), [](const json& a, const json& b) {
-        return a.value("camera_id", std::string()) < b.value("camera_id", std::string());
-      });
-
-      res.set_content(json{{"success", true}, {"device_id", device_id}, {"cameras", cameras}}.dump(),
-              "application/json");
-    });
-
-    server.Get("/api/public/docs", [](const httplib::Request&, httplib::Response& res) {
-      res.set_content(buildExternalApiDoc().dump(2), "application/json");
-    });
-
-    server.Post("/api/register", [](const httplib::Request& req, httplib::Response& res) {
-        try {
-            auto body = json::parse(req.body);
-            const std::string raw_device_id = body.value("device_id", std::string());
-            const std::string device_id = normalizeId(raw_device_id, "unknown-device");
-            const std::string device_name = body.value("device_name", std::string("mobile-device"));
-
-            std::lock_guard<std::mutex> lock(g_data_mutex);
-            auto& device = g_devices[device_id];
-            device.device_id = device_id;
-            device.device_name = device_name;
-            device.user_agent = req.get_header_value("User-Agent");
-            device.remote_ip = inferRemoteIp(req);
-            device.last_seen_ms = nowMs();
-
-            if (body.contains("cameras") && body["cameras"].is_array()) {
-                for (const auto& item : body["cameras"]) {
-                    if (!item.is_object()) {
-                        continue;
-                    }
-                    const std::string camera_id = normalizeId(item.value("id", std::string()), std::string());
-                    if (camera_id.empty()) {
-                        continue;
-                    }
-                    auto& camera = device.cameras[camera_id];
-                    camera.camera_id = camera_id;
-                    camera.camera_label = item.value("label", camera_id);
-                }
-            }
-
-            res.set_content(json{{"success", true}, {"device_id", device_id}}.dump(), "application/json");
-        } catch (const std::exception& e) {
-            res.status = 400;
-            res.set_content(json{{"success", false}, {"error", e.what()}}.dump(), "application/json");
-        }
-    });
-
-    server.Post("/api/publish-frame", [](const httplib::Request& req, httplib::Response& res) {
-        try {
-            auto body = json::parse(req.body);
-            const std::string device_id = normalizeId(body.value("device_id", std::string()), "unknown-device");
-            const std::string camera_id = normalizeId(body.value("camera_id", std::string()), "default-camera");
-            const std::string camera_label = body.value("camera_label", camera_id);
-            const std::string device_name = body.value("device_name", std::string("mobile-device"));
-            const std::string image_data_url = body.value("image_data_url", std::string());
-
-            std::vector<unsigned char> jpeg;
-            std::string decode_error;
-            if (!decodeImageDataUrl(image_data_url, jpeg, decode_error)) {
-                res.status = 400;
-                res.set_content(json{{"success", false}, {"error", decode_error}}.dump(), "application/json");
-                return;
-            }
-
-            {
-                std::lock_guard<std::mutex> lock(g_data_mutex);
-                auto& device = g_devices[device_id];
-                device.device_id = device_id;
-                device.device_name = device_name;
-                device.user_agent = req.get_header_value("User-Agent");
-                device.remote_ip = inferRemoteIp(req);
-                device.last_seen_ms = nowMs();
-
-                auto& camera = device.cameras[camera_id];
-                camera.camera_id = camera_id;
-                camera.camera_label = camera_label;
-                camera.last_frame_ms = device.last_seen_ms;
-                camera.jpeg_frame = std::move(jpeg);
-            }
-
-            res.set_content(json{{"success", true}}.dump(), "application/json");
-        } catch (const std::exception& e) {
-            res.status = 400;
-            res.set_content(json{{"success", false}, {"error", e.what()}}.dump(), "application/json");
-        }
-    });
-
-    server.Get(R"(/api/frame/([^/]+)/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
-      std::vector<unsigned char> frame;
-      uint64_t last_frame_ms = 0;
-      std::string error;
-      if (!readFrameSnapshot(req.matches[1].str(), req.matches[2].str(), frame, last_frame_ms, error)) {
-        res.status = 404;
-        res.set_content(json{{"error", error}}.dump(), "application/json");
-        return;
-      }
-
-        res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-      res.set_header("X-Frame-Timestamp", std::to_string(last_frame_ms));
-        res.set_content(reinterpret_cast<const char*>(frame.data()), static_cast<size_t>(frame.size()), "image/jpeg");
-    });
-
-    server.Get(R"(/api/public/frame/([^/]+)/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
-      std::vector<unsigned char> frame;
-      uint64_t last_frame_ms = 0;
-      std::string error;
-      if (!readFrameSnapshot(req.matches[1].str(), req.matches[2].str(), frame, last_frame_ms, error)) {
-        res.status = 404;
-        res.set_content(json{{"success", false}, {"error", error}}.dump(), "application/json");
-        return;
-      }
-
-      res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-      res.set_header("X-Frame-Timestamp", std::to_string(last_frame_ms));
-      res.set_content(reinterpret_cast<const char*>(frame.data()), static_cast<size_t>(frame.size()), "image/jpeg");
-    });
-
-    server.Get(R"(/api/public/frame/([^/]+)/([^/]+)/base64)", [](const httplib::Request& req, httplib::Response& res) {
-      std::vector<unsigned char> frame;
-      uint64_t last_frame_ms = 0;
-      std::string error;
-      if (!readFrameSnapshot(req.matches[1].str(), req.matches[2].str(), frame, last_frame_ms, error)) {
-        res.status = 404;
-        res.set_content(json{{"success", false}, {"error", error}}.dump(), "application/json");
-        return;
-      }
-
-      res.set_content(json{
-        {"success", true},
-        {"mime", "image/jpeg"},
-        {"updated_at_ms", last_frame_ms},
-        {"frame_base64", encodeBase64(frame)}
-      }.dump(), "application/json");
-    });
-
-    server.Get("/healthz", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content(json{{"ok", true}, {"plugin", "cam-lan-stream"}}.dump(), "application/json");
+    sendMessage({
+        {"action", "message"},
+        {"plugin", kPluginName},
+        {"target_plugin", kPluginName},
+        {"target_node", target_node},
+        {"data", data}
     });
 }
 
-void stopHttpServer() {
-    g_running.store(false);
-  #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-    if (g_https_server) {
-      g_https_server->stop();
-    }
-  #endif
-    if (g_http_server) {
-      g_http_server->stop();
-    }
-    if (g_http_thread.joinable()) {
-        g_http_thread.join();
-    }
-}
-
-void handleIncomingMessage(const json& msg) {
-    const std::string cmd = msg.value("cmd", std::string());
-    const std::string action = msg.value("action", std::string());
-    const std::string request_id = msg.value("request_id", std::string());
+bool handleMessage(const json& msg) {
+    const std::string cmd = msg.value("cmd", std::string(""));
+    const std::string action = msg.value("action", std::string(""));
+    const std::string request_id = msg.value("request_id", std::string(""));
 
     if (cmd == "stop") {
-        sendMessage({{"action", "stopped"}, {"plugin", "cam-lan-stream"}});
-        stopHttpServer();
-        return;
+        sendMessage({{"action", "stopped"}, {"plugin", kPluginName}});
+        return false;
     }
 
-    if (cmd == "status" || action == "status" || action == "list_devices") {
-        sendMessage(buildStatusResponse(request_id));
-        return;
+    if (cmd == "start") {
+        return true;
+    }
+
+    if (cmd == "status") {
+        auto payload = buildDiscoverResult(request_id);
+        payload["action"] = "status_result";
+        sendMessage(payload);
+        return true;
+    }
+
+    if (isResponseAction(action) || msg.contains("from_node")) {
+        cacheStatus(msg);
+        sendMessage(msg);
+        return true;
     }
 
     if (action == "ping") {
-        sendMessage({{"action", "pong"}, {"request_id", request_id}});
-        return;
+        sendMessage({{"action", "pong"}, {"plugin", kPluginName}, {"request_id", request_id}});
+        return true;
     }
+
+    if (action == "describe" || action == "capabilities") {
+        auto payload = buildCapabilities();
+        if (!request_id.empty()) {
+            payload["request_id"] = request_id;
+        }
+        sendMessage(payload);
+        return true;
+    }
+
+    if (action == "discover") {
+        sendMessage(buildDiscoverResult(request_id));
+        return true;
+    }
+
+    if (action == "status" && resolveTargetNode(msg).empty()) {
+        sendMessage(buildCachedStatusResult(request_id, "status_result"));
+        return true;
+    }
+
+    if (action == "get_config" && resolveTargetNode(msg).empty()) {
+        sendMessage(buildCachedStatusResult(request_id, "config_result"));
+        return true;
+    }
+
+    if (action == "status" || action == "get_config" || action == "set_config" ||
+        action == "start_stream" || action == "stop_stream" || action == "restart_stream" ||
+        action == "set_public_host") {
+        forwardToHoney(msg);
+        return true;
+    }
+
+    emitBridgeError(request_id, "unsupported action: " + action);
+    return true;
 }
 
 }  // namespace
 
 int main() {
     spdlog::set_level(spdlog::level::info);
-
-    int env_port = 0;
-    if (parsePort(std::getenv("TEA_CAM_STREAM_PORT"), env_port)) {
-        g_listen_port = env_port;
-    }
-
-    const char* bind_host = std::getenv("TEA_CAM_STREAM_BIND_HOST");
-    if (bind_host && *bind_host) {
-        g_bind_host = bind_host;
-    }
-
-    const char* public_host = std::getenv("TEA_CAM_STREAM_PUBLIC_HOST");
-    if (public_host && *public_host) {
-        g_public_host = public_host;
-    }
-
-    const char* public_origin = std::getenv("TEA_CAM_STREAM_PUBLIC_ORIGIN");
-    if (public_origin && *public_origin) {
-      g_public_origin = public_origin;
-      while (!g_public_origin.empty() && g_public_origin.back() == '/') {
-        g_public_origin.pop_back();
-      }
-    }
-
-  #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-    const char* cert_path = std::getenv("TEA_CAM_STREAM_SSL_CERT");
-    const char* key_path = std::getenv("TEA_CAM_STREAM_SSL_KEY");
-    if (cert_path && *cert_path && key_path && *key_path) {
-      if (fs::exists(cert_path) && fs::exists(key_path)) {
-        g_https_server = std::make_unique<httplib::SSLServer>(cert_path, key_path);
-        if (g_https_server && g_https_server->is_valid()) {
-          g_use_https = true;
-          spdlog::info("cam-lan-stream HTTPS enabled using cert={} key={}", cert_path, key_path);
-        } else {
-          g_https_server.reset();
-          spdlog::warn("Failed to initialize HTTPS server, falling back to HTTP");
-        }
-      } else {
-        spdlog::warn("HTTPS cert/key path missing, falling back to HTTP");
-      }
-    }
-  #else
-    if (std::getenv("TEA_CAM_STREAM_SSL_CERT") || std::getenv("TEA_CAM_STREAM_SSL_KEY")) {
-      spdlog::warn("HTTPS requested but this build does not include OpenSSL support; using HTTP");
-    }
-  #endif
-
-    if (!g_use_https) {
-      g_http_server = std::make_unique<httplib::Server>();
-    }
-
-    auto* server = activeServer();
-    if (!server) {
-      spdlog::error("No HTTP server instance available");
-      return 1;
-    }
-
-    configureHttpRoutes(*server);
-
-    const bool use_https = g_use_https;
-    g_http_thread = std::thread([server, use_https]() {
-      spdlog::info("cam-lan-stream {} server listening on {}:{}", use_https ? "https" : "http", g_bind_host, g_listen_port);
-      if (!server->listen(g_bind_host.c_str(), g_listen_port)) {
-            if (g_running.load()) {
-                sendMessage({
-                    {"action", "error"},
-                    {"plugin", "cam-lan-stream"},
-            {"message", std::string("failed to listen ") + (use_https ? "https" : "http") + " server on " + g_bind_host + ":" + std::to_string(g_listen_port)}
-                });
-            }
-        }
-    });
+    spdlog::info("cam-lan-stream server bridge started");
 
     sendMessage({
         {"action", "ready"},
-        {"plugin", "cam-lan-stream"},
+        {"plugin", kPluginName},
         {"role", "server"},
-        {"server", {
-            {"bind_host", g_bind_host},
-            {"port", g_listen_port},
-            {"public_origin", effectivePublicOrigin()},
-            {"mobile_page_url", effectivePublicOrigin() + "/"},
-            {"external_api_base", effectivePublicOrigin() + "/api/public"},
-            {"external_api_docs", effectivePublicOrigin() + "/api/public/docs"}
-        }}
+        {"summary", "LemonTea-side camera control bridge"}
     });
 
     std::string line;
-    while (g_running.load() && std::getline(std::cin, line)) {
+    while (std::getline(std::cin, line)) {
         if (line.empty()) {
             continue;
         }
+
         try {
             auto msg = json::parse(line);
-            handleIncomingMessage(msg);
+            if (!handleMessage(msg)) {
+                break;
+            }
         } catch (const std::exception& e) {
             sendMessage({
                 {"action", "error"},
-                {"plugin", "cam-lan-stream"},
+                {"plugin", kPluginName},
                 {"message", std::string("invalid json message: ") + e.what()}
             });
         }
     }
 
-    stopHttpServer();
     return 0;
 }

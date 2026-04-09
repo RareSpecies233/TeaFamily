@@ -42,7 +42,20 @@ OrangeTea 本身不直接绑定后端 TCP/UDP 端口：
 
 ## 5. 插件端口补充
 ### cam-lan-stream
-- 默认 `19731`，可以由插件环境变量调整（`TEA_CAM_STREAM_PORT`）
+- `8554`
+  - HoneyTea 上 MediaMTX RTSP 输出端口
+- `8889`
+  - HoneyTea 上 MediaMTX WebRTC HTTP / WHEP 端口
+- `8189`
+  - HoneyTea 上 MediaMTX WebRTC UDP 端口
+- `20000`
+  - HoneyTea 上供 YOLO / 第三方程序接入的裸 H.264 TCP 端口
+
+以上端口会由摄像头插件参数控制界面或配置下发动态调整；默认值分别对应：
+- `rtsp_port = 8554`
+- `webrtc_port = 8889`
+- `webrtc_udp_port = 8189`
+- `yolo_port = 20000`
 
 ## 6. 防火墙与最小开放策略
 

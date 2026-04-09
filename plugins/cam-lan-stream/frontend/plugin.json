@@ -2,8 +2,8 @@
   "name": "cam-lan-stream",
   "version": "1.0.0",
   "entry": "index.js",
-  "title": "摄像头串流",
+  "title": "树莓派摄像头",
   "icon": "video-camera",
   "route": "/plugin/cam-lan-stream",
-  "description": "局域网移动端摄像头采集与实时预览"
+  "description": "通过 HoneyTea 控制树莓派摄像头，并向 WebRTC 与 YOLO 输出视频流"
 }

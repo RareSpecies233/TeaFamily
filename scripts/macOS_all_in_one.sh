@@ -110,15 +110,9 @@ export_plugins_to() {
         fi
 
         log "导出插件 $plugin"
-        if [[ "$plugin" == "cam-lan-stream" ]]; then
-            "$invoker" --lemon-platform "$lemon_platform" --output-dir "$PROJECT_ROOT/dist/plugin-exports/$plugin" || {
-                log "ERROR: 插件 $plugin 导出失败"
-            }
-        else
-            "$invoker" --lemon-platform "$lemon_platform" --honey-platform "$honey_platform" --output-dir "$PROJECT_ROOT/dist/plugin-exports/$plugin" || {
-                log "ERROR: 插件 $plugin 导出失败"
-            }
-        fi
+        "$invoker" --lemon-platform "$lemon_platform" --honey-platform "$honey_platform" --output-dir "$PROJECT_ROOT/dist/plugin-exports/$plugin" || {
+            log "ERROR: 插件 $plugin 导出失败"
+        }
     done
 }
 

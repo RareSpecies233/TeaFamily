@@ -1,12 +1,13 @@
 {
   "name": "cam-lan-stream",
   "version": "1.0.0",
-  "description": "局域网摄像头采集与实时串流插件（仅 LemonTea 安装）",
+  "description": "树莓派摄像头控制与 MediaMTX 双路串流插件",
   "author": "TeaFamily",
-  "plugin_type": "lemon-only",
+  "plugin_type": "distributed",
   "depends_on": [],
-  "capabilities": ["camera", "stream", "lan"],
+  "capabilities": ["camera", "stream", "mediamtx", "webrtc", "h264"],
   "communication": "stdio",
   "has_frontend": true,
-  "server_binary": "server/tea-plugin-cam-lan-stream-server"
+  "server_binary": "server/tea-plugin-cam-lan-stream-server",
+  "client_binary": "client/tea-plugin-cam-lan-stream-client"
 }
