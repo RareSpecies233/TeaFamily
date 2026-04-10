@@ -56,6 +56,23 @@ OrangeTea 页面可直接调整以下参数，并通过 LemonTea 转发给 Honey
 
 参数保存后会写入 HoneyTea 插件目录下的 `runtime/camera-config.json`，后续重启插件会自动恢复。
 
+## 日志与排障
+摄像头插件的 client/server 现在都会把日志同时输出到标准输出和运行目录下的 `runtime` 日志文件，便于离线排查。
+
+- HoneyTea 侧（client）：`runtime/cam-lan-stream-client.log`
+- LemonTea 侧（server）：`runtime/cam-lan-stream-server.log`
+
+日志内容包含：
+- 插件启动信息（运行目录、日志文件路径）
+- `start_stream` / `stop_stream` / `set_config` 等关键动作
+- MediaMTX 与 ffmpeg 子进程启动、退出状态
+- 自动重启次数与失败原因
+- 桥接转发错误、JSON 解析异常
+
+说明：
+- 日志文件位于各自进程的运行目录（即程序当前工作目录下的 `runtime`）。
+- HoneyTea 侧日志中会带 `[mediamtx]`、`[relay]` 前缀，分别对应子进程输出，适合快速定位媒体链路故障。
+
 ## 导出脚本
 
 ### macOS LemonTea + macOS HoneyTea

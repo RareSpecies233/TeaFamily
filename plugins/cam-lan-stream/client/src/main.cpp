@@ -21,6 +21,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits.h>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -28,6 +29,8 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
 using json = nlohmann::json;
@@ -37,6 +40,7 @@ namespace {
 constexpr const char* kPluginName = "cam-lan-stream";
 constexpr const char* kConfigFileName = "camera-config.json";
 constexpr const char* kMediaMtxConfigName = "mediamtx.yml";
+constexpr const char* kClientLogFileName = "cam-lan-stream-client.log";
 constexpr size_t kRelayBufferSize = 64 * 1024;
 
 template <typename T>
@@ -618,6 +622,35 @@ void sendJson(const json& payload) {
     std::cout.flush();
 }
 
+bool configureLogging(std::string& warning) {
+    try {
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(
+            joinPath(g_runtime_dir, kClientLogFileName),
+            true);
+
+        console_sink->set_level(spdlog::level::info);
+        file_sink->set_level(spdlog::level::trace);
+
+        std::vector<spdlog::sink_ptr> sinks{console_sink, file_sink};
+        auto logger = std::make_shared<spdlog::logger>("cam-lan-stream-client", sinks.begin(), sinks.end());
+        logger->set_pattern("%Y-%m-%d %H:%M:%S.%e [%^%l%$] [pid %P] [tid %t] %v");
+        logger->set_level(spdlog::level::info);
+        logger->flush_on(spdlog::level::info);
+
+        spdlog::set_default_logger(logger);
+        spdlog::set_level(spdlog::level::info);
+        spdlog::flush_on(spdlog::level::info);
+
+        spdlog::info("cam-lan-stream client logger initialized: {}", joinPath(g_runtime_dir, kClientLogFileName));
+        return true;
+    } catch (const std::exception& e) {
+        warning = std::string("failed to initialize file logger: ") + e.what();
+        spdlog::set_level(spdlog::level::info);
+        return false;
+    }
+}
+
 void emitStreamWarning(const std::string& message) {
     sendJson({
         {"action", "stream_warning"},
@@ -632,6 +665,10 @@ std::string configFilePath() {
 
 std::string mediaMtxConfigPath() {
     return joinPath(g_runtime_dir, kMediaMtxConfigName);
+}
+
+std::string clientLogFilePath() {
+    return joinPath(g_runtime_dir, kClientLogFileName);
 }
 
 json buildSystemInfo() {
@@ -734,6 +771,7 @@ void loadPersistedConfig() {
         }
     } catch (const std::exception& e) {
         g_last_warning = std::string("failed to load persisted camera config: ") + e.what();
+        spdlog::warn("{}", g_last_warning);
     }
 
     if (g_config.tuning_file.empty()) {
@@ -752,6 +790,7 @@ void savePersistedConfig() {
         output << g_config.toJson().dump(2);
     } catch (const std::exception& e) {
         g_last_warning = std::string("failed to persist camera config: ") + e.what();
+        spdlog::warn("{}", g_last_warning);
     }
 }
 
@@ -865,7 +904,14 @@ void startLogReaderThread(std::thread& thread, int fd, const std::string& prefix
         std::array<char, 512> chunk{};
         while (g_running.load()) {
             const ssize_t count = ::read(fd, chunk.data(), chunk.size());
-            if (count <= 0) {
+            if (count < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                spdlog::warn("{}log reader read failed: {}", prefix, std::strerror(errno));
+                break;
+            }
+            if (count == 0) {
                 break;
             }
             buffer.append(chunk.data(), static_cast<size_t>(count));
@@ -889,6 +935,7 @@ void startLogReaderThread(std::thread& thread, int fd, const std::string& prefix
                 spdlog::info("{}{}", prefix, line);
             }
         }
+        spdlog::info("{}log reader stopped", prefix);
     });
 }
 
@@ -987,10 +1034,12 @@ bool prepareRuntimeDependencies(std::string& mediamtx_bin, std::string& ffmpeg_b
 
     if (mediamtx_bin.empty()) {
         error = "MediaMTX executable not found. Set TEA_CAM_STREAM_MEDIAMTX_BIN or install mediamtx.";
+        spdlog::error("{}", error);
         return false;
     }
     if (ffmpeg_bin.empty()) {
         error = "ffmpeg executable not found. Set TEA_CAM_STREAM_FFMPEG_BIN or install ffmpeg.";
+        spdlog::error("{}", error);
         return false;
     }
 
@@ -1001,11 +1050,13 @@ bool platformReady(std::string& error) {
 #ifdef __linux__
     if (!pathExists("/dev/video0") || !pathExists("/dev/media0")) {
         error = "Raspberry Pi camera devices (/dev/video0, /dev/media0) are not available";
+        spdlog::error("{}", error);
         return false;
     }
     return true;
 #else
     error = "cam-lan-stream HoneyTea runtime currently requires Linux / Raspberry Pi camera stack";
+    spdlog::error("{}", error);
     return false;
 #endif
 }
@@ -1013,6 +1064,7 @@ bool platformReady(std::string& error) {
 void stopStreamingServices();
 
 bool startStreamingServices(const std::string& request_id, std::string& error) {
+    spdlog::info("startStreamingServices called, request_id={}", request_id.empty() ? "-" : request_id);
     stopStreamingServices();
 
     std::string platform_error;
@@ -1029,18 +1081,28 @@ bool startStreamingServices(const std::string& request_id, std::string& error) {
 
     try {
         writeMediaMtxConfig();
+        spdlog::info("wrote MediaMTX config: {}", mediaMtxConfigPath());
     } catch (const std::exception& e) {
         error = std::string("failed to write mediamtx.yml: ") + e.what();
+        spdlog::error("{}", error);
         return false;
     }
 
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         if (!openYoloServerLocked(error)) {
+            spdlog::error("{}", error);
             return false;
         }
+        spdlog::info("YOLO TCP server listening on 0.0.0.0:{}", g_config.yolo_port);
         startAcceptThreadLocked();
 
+        spdlog::info(
+            "starting MediaMTX: bin={}, rtsp_port={}, webrtc_port={}, webrtc_udp_port={}",
+            mediamtx_bin,
+            g_config.rtsp_port,
+            g_config.webrtc_port,
+            g_config.webrtc_udp_port);
         if (!g_mediamtx_process.start(
             {mediamtx_bin, mediaMtxConfigPath()},
                 g_runtime_dir,
@@ -1048,9 +1110,11 @@ bool startStreamingServices(const std::string& request_id, std::string& error) {
                 true,
                 true)) {
             error = "failed to start MediaMTX process";
+            spdlog::error("{}", error);
             closeFd(g_yolo_server_fd);
             return false;
         }
+        spdlog::info("MediaMTX started, pid={}", g_mediamtx_process.pid);
         startLogReaderThread(g_mediamtx_log_thread, g_mediamtx_process.stdout_fd, "[mediamtx] ");
     }
 
@@ -1059,6 +1123,7 @@ bool startStreamingServices(const std::string& request_id, std::string& error) {
     const std::string input_url = "rtsp://127.0.0.1:" + std::to_string(g_config.rtsp_port) + "/" + g_config.stream_path;
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
+        spdlog::info("starting relay ffmpeg: bin={}, input={}", ffmpeg_bin, input_url);
         if (!g_relay_process.start(
                 {ffmpeg_bin,
                  "-nostdin",
@@ -1085,9 +1150,11 @@ bool startStreamingServices(const std::string& request_id, std::string& error) {
                 true,
                 false)) {
             error = "failed to start ffmpeg H.264 relay";
+            spdlog::error("{}", error);
             g_mediamtx_process.stop();
             return false;
         }
+        spdlog::info("relay ffmpeg started, pid={}", g_relay_process.pid);
         startLogReaderThread(g_relay_log_thread, g_relay_process.stderr_fd, "[relay] ");
         startRelayDataThread();
     }
@@ -1103,10 +1170,12 @@ bool startStreamingServices(const std::string& request_id, std::string& error) {
         {"state", "running"},
         {"message", "MediaMTX and H.264 relay started"}
     });
+    spdlog::info("stream services started successfully");
     return true;
 }
 
 void stopStreamingServices() {
+    spdlog::info("stopStreamingServices called");
     g_stream_requested.store(false);
 
     {
@@ -1125,16 +1194,19 @@ void stopStreamingServices() {
     joinThread(g_relay_log_thread);
     joinThread(g_mediamtx_log_thread);
     joinThread(g_yolo_accept_thread);
+    spdlog::info("stream services stopped");
 }
 
 void pollProcessesLocked() {
     int status = 0;
     if (g_mediamtx_process.poll(&status)) {
         g_last_error = "MediaMTX exited with status " + std::to_string(status);
+        spdlog::error("{}", g_last_error);
     }
 
     if (g_relay_process.poll(&status)) {
         g_last_error = "H.264 relay exited with status " + std::to_string(status);
+        spdlog::error("{}", g_last_error);
     }
 }
 
@@ -1235,10 +1307,12 @@ void monitorLoop() {
 
         ++g_restart_failures;
         emitStreamWarning("video service exited unexpectedly, restarting: " + reason);
+        spdlog::warn("video service exited unexpectedly, restart attempt #{}: {}", g_restart_failures, reason);
         std::string restart_error;
         if (!startStreamingServices(std::string(), restart_error)) {
             g_stream_requested.store(false);
             g_last_error = restart_error;
+            spdlog::error("restart failed: {}", restart_error);
             sendStreamError(std::string(), restart_error);
         }
     }
@@ -1247,6 +1321,7 @@ void monitorLoop() {
 void handleSetConfig(const json& msg) {
     const std::string request_id = msg.value("request_id", std::string(""));
     const json config = msg.value("camera_config", json::object());
+    spdlog::info("received set_config, request_id={}", request_id.empty() ? "-" : request_id);
 
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
@@ -1268,6 +1343,7 @@ void handleSetConfig(const json& msg) {
 
 void handleStart(const json& msg) {
     const std::string request_id = msg.value("request_id", std::string(""));
+    spdlog::info("received start_stream, request_id={}", request_id.empty() ? "-" : request_id);
     std::string error;
     if (!startStreamingServices(request_id, error)) {
         g_last_error = error;
@@ -1279,6 +1355,7 @@ void handleStart(const json& msg) {
 
 void handleStop(const json& msg) {
     const std::string request_id = msg.value("request_id", std::string(""));
+    spdlog::info("received stop_stream, request_id={}", request_id.empty() ? "-" : request_id);
     stopStreamingServices();
     sendJson(buildStatusPayload(request_id));
 }
@@ -1293,6 +1370,7 @@ void handleMessage(const json& msg) {
     }
 
     if (cmd == "stop") {
+        spdlog::info("received cmd=stop, shutting down client plugin");
         g_running.store(false);
         stopStreamingServices();
         sendJson({{"action", "stopped"}, {"plugin", kPluginName}});
@@ -1368,6 +1446,7 @@ void handleMessage(const json& msg) {
         {"request_id", request_id},
         {"message", "unsupported action: " + action}
     });
+    spdlog::warn("unsupported action received: {}", action);
 }
 
 }  // namespace
@@ -1378,7 +1457,19 @@ int main() {
 
     g_runtime_dir = joinPath(currentWorkingDirectory(), "runtime");
     ensureDirectory(g_runtime_dir);
+
+    std::string logger_warning;
+    if (!configureLogging(logger_warning)) {
+        g_last_warning = logger_warning;
+    }
+    if (!logger_warning.empty()) {
+        spdlog::warn("{}", logger_warning);
+    }
+
     loadPersistedConfig();
+    spdlog::info("cam-lan-stream client started, runtime_dir={}", g_runtime_dir);
+    spdlog::info("camera config file: {}", configFilePath());
+    spdlog::info("log file: {}", clientLogFilePath());
 
     g_monitor_thread = std::thread(monitorLoop);
 
@@ -1400,6 +1491,7 @@ int main() {
             auto msg = json::parse(line);
             handleMessage(msg);
         } catch (const std::exception& e) {
+            spdlog::warn("invalid json message: {}", e.what());
             sendJson({
                 {"action", "stream_error"},
                 {"plugin", kPluginName},

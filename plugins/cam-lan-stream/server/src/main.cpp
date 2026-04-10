@@ -1,10 +1,21 @@
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <limits.h>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
 using json = nlohmann::json;
@@ -12,6 +23,63 @@ using json = nlohmann::json;
 namespace {
 
 constexpr const char* kPluginName = "cam-lan-stream";
+constexpr const char* kServerLogFileName = "cam-lan-stream-server.log";
+
+bool pathExists(const std::string& path) {
+    struct stat st {};
+    return !path.empty() && ::stat(path.c_str(), &st) == 0;
+}
+
+bool ensureDirectory(const std::string& path) {
+    if (path.empty()) {
+        return false;
+    }
+
+    if (pathExists(path)) {
+        return true;
+    }
+
+    size_t pos = 0;
+    while (true) {
+        pos = path.find('/', pos + 1);
+        const std::string segment = pos == std::string::npos ? path : path.substr(0, pos);
+        if (segment.empty()) {
+            if (pos == std::string::npos) {
+                break;
+            }
+            continue;
+        }
+        if (!pathExists(segment) && ::mkdir(segment.c_str(), 0755) != 0 && errno != EEXIST) {
+            return false;
+        }
+        if (pos == std::string::npos) {
+            break;
+        }
+    }
+
+    return pathExists(path);
+}
+
+std::string joinPath(const std::string& base, const std::string& child) {
+    if (base.empty()) {
+        return child;
+    }
+    if (child.empty()) {
+        return base;
+    }
+    if (base.back() == '/') {
+        return base + child;
+    }
+    return base + "/" + child;
+}
+
+std::string currentWorkingDirectory() {
+    char buffer[PATH_MAX] = {0};
+    if (::getcwd(buffer, sizeof(buffer) - 1)) {
+        return buffer;
+    }
+    return ".";
+}
 
 std::mutex g_out_mutex;
 std::mutex g_state_mutex;
@@ -28,6 +96,38 @@ json g_last_status = {
 };
 uint64_t g_status_version = 0;
 std::string g_default_target_node;
+std::string g_runtime_dir;
+
+std::string serverLogFilePath() {
+    return joinPath(g_runtime_dir, kServerLogFileName);
+}
+
+bool configureLogging(std::string& warning) {
+    try {
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(serverLogFilePath(), true);
+
+        console_sink->set_level(spdlog::level::info);
+        file_sink->set_level(spdlog::level::trace);
+
+        std::vector<spdlog::sink_ptr> sinks{console_sink, file_sink};
+        auto logger = std::make_shared<spdlog::logger>("cam-lan-stream-server", sinks.begin(), sinks.end());
+        logger->set_pattern("%Y-%m-%d %H:%M:%S.%e [%^%l%$] [pid %P] [tid %t] %v");
+        logger->set_level(spdlog::level::info);
+        logger->flush_on(spdlog::level::info);
+
+        spdlog::set_default_logger(logger);
+        spdlog::set_level(spdlog::level::info);
+        spdlog::flush_on(spdlog::level::info);
+
+        spdlog::info("cam-lan-stream server logger initialized: {}", serverLogFilePath());
+        return true;
+    } catch (const std::exception& e) {
+        warning = std::string("failed to initialize file logger: ") + e.what();
+        spdlog::set_level(spdlog::level::info);
+        return false;
+    }
+}
 
 void sendMessage(const json& payload) {
     std::lock_guard<std::mutex> lock(g_out_mutex);
@@ -159,6 +259,7 @@ json buildCachedStatusResult(const std::string& request_id, const std::string& a
 }
 
 void emitBridgeError(const std::string& request_id, const std::string& message) {
+    spdlog::warn("bridge error: {}", message);
     json payload = {
         {"action", "error"},
         {"plugin", kPluginName},
@@ -177,6 +278,13 @@ void forwardToHoney(const json& msg) {
         emitBridgeError(request_id, "missing target_node for HoneyTea camera control");
         return;
     }
+
+    const std::string action = msg.value("action", std::string(""));
+    spdlog::info(
+        "forwarding action to HoneyTea, target_node={}, action={}, request_id={}",
+        target_node,
+        action,
+        request_id.empty() ? "-" : request_id);
 
     json data = msg;
     data.erase("target");
@@ -198,11 +306,13 @@ bool handleMessage(const json& msg) {
     const std::string request_id = msg.value("request_id", std::string(""));
 
     if (cmd == "stop") {
+        spdlog::info("received cmd=stop, shutting down server bridge");
         sendMessage({{"action", "stopped"}, {"plugin", kPluginName}});
         return false;
     }
 
     if (cmd == "start") {
+        spdlog::info("received cmd=start");
         return true;
     }
 
@@ -214,6 +324,7 @@ bool handleMessage(const json& msg) {
     }
 
     if (isResponseAction(action) || msg.contains("from_node")) {
+        spdlog::info("received response action from HoneyTea: {}", action.empty() ? "(from_node message)" : action);
         cacheStatus(msg);
         sendMessage(msg);
         return true;
@@ -256,14 +367,25 @@ bool handleMessage(const json& msg) {
     }
 
     emitBridgeError(request_id, "unsupported action: " + action);
+    spdlog::warn("unsupported action received: {}", action);
     return true;
 }
 
 }  // namespace
 
 int main() {
+    g_runtime_dir = joinPath(currentWorkingDirectory(), "runtime");
+    ensureDirectory(g_runtime_dir);
+
+    std::string logger_warning;
+    if (!configureLogging(logger_warning)) {
+        spdlog::warn("{}", logger_warning);
+    }
+
     spdlog::set_level(spdlog::level::info);
     spdlog::info("cam-lan-stream server bridge started");
+    spdlog::info("runtime_dir={}", g_runtime_dir);
+    spdlog::info("log file={}", serverLogFilePath());
 
     sendMessage({
         {"action", "ready"},
@@ -284,6 +406,7 @@ int main() {
                 break;
             }
         } catch (const std::exception& e) {
+            spdlog::warn("invalid json message: {}", e.what());
             sendMessage({
                 {"action", "error"},
                 {"plugin", kPluginName},
