@@ -395,6 +395,9 @@ void HoneyTea::reconnectLoop() {
 void HoneyTea::handlePluginOutput(const std::string& plugin, const tea::json& msg) {
     std::string event = msg.value("event", msg.value("action", std::string("")));
 
+    spdlog::debug("Plugin '{}' output: event='{}', payload={}", plugin, event,
+                  msg.dump(-1, ' ', false, tea::json::error_handler_t::replace));
+
     if (event == "message" || event == "plugin_message") {
         // Forward to server
         std::string target = msg.value("target_node", msg.value("target", std::string("")));
@@ -428,7 +431,10 @@ void HoneyTea::handlePluginOutput(const std::string& plugin, const tea::json& ms
     } else if (event == "error") {
         spdlog::error("Plugin '{}' error: {}", plugin, msg.value("message", "unknown"));
     } else if (event == "log") {
-        spdlog::debug("[plugin:{}] {}", plugin, msg.value("message", ""));
+        spdlog::info("[plugin:{}] {}", plugin, msg.value("message", ""));
+    } else if (!event.empty()) {
+        spdlog::debug("Plugin '{}' event '{}': {}", plugin, event,
+                      msg.dump(-1, ' ', false, tea::json::error_handler_t::replace));
     }
 }
 

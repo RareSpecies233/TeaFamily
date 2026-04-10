@@ -22,7 +22,7 @@ bool ProcessManager::registerProcess(const std::string& name, const std::string&
                                       const std::string& work_dir) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (processes_.count(name)) {
-        spdlog::warn("Process {} already registered", name);
+        spdlog::warn("Process {} already registered, ignoring duplicate registration", name);
         return false;
     }
     ProcessInfo info;
@@ -31,7 +31,8 @@ bool ProcessManager::registerProcess(const std::string& name, const std::string&
     info.args = args;
     info.working_dir = work_dir;
     processes_[name] = info;
-    spdlog::info("Process registered: {} ({})", name, binary);
+    spdlog::info("Process registered: {} (binary='{}', work_dir='{}', args={})",
+                 name, binary, work_dir, args.size());
     return true;
 }
 
@@ -58,14 +59,25 @@ bool ProcessManager::startProcess(const std::string& name) {
 
     auto& info = it->second;
     if (info.state == PluginState::RUNNING) {
-        spdlog::warn("Process {} is already running", name);
+        spdlog::warn("Process {} is already running (pid={})", name, info.pid);
         return true;
     }
+
+    spdlog::info("Starting process '{}': binary='{}', work_dir='{}', args=[{}]",
+                 name, info.binary_path, info.working_dir,
+                 [&]() {
+                     std::string s;
+                     for (size_t i = 0; i < info.args.size(); ++i) {
+                         if (i > 0) s += ", ";
+                         s += "'" + info.args[i] + "'";
+                     }
+                     return s;
+                 }());
 
     // Create pipes for stdin/stdout
     int stdin_pipe[2], stdout_pipe[2];
     if (pipe(stdin_pipe) < 0 || pipe(stdout_pipe) < 0) {
-        spdlog::error("Failed to create pipes for {}: {}", name, strerror(errno));
+        spdlog::error("Failed to create pipes for {}: {} (errno={})", name, strerror(errno), errno);
         return false;
     }
 
@@ -74,7 +86,7 @@ bool ProcessManager::startProcess(const std::string& name) {
 
     pid_t pid = fork();
     if (pid < 0) {
-        spdlog::error("Fork failed for {}: {}", name, strerror(errno));
+        spdlog::error("Fork failed for {}: {} (errno={})", name, strerror(errno), errno);
         info.state = old_state;
         close(stdin_pipe[0]); close(stdin_pipe[1]);
         close(stdout_pipe[0]); close(stdout_pipe[1]);
@@ -127,7 +139,8 @@ bool ProcessManager::startProcess(const std::string& name) {
     info.started_at = nowMs();
     info.exit_code = 0;
 
-    spdlog::info("Process started: {} (pid={})", name, pid);
+    spdlog::info("Process started: {} (pid={}, binary='{}', work_dir='{}')",
+                 name, pid, info.binary_path, info.working_dir);
 
     if (on_state_change_) {
         on_state_change_(name, old_state, PluginState::RUNNING);
@@ -177,7 +190,7 @@ bool ProcessManager::stopProcess(const std::string& name, int timeout_ms) {
     }
 
     if (!exited) {
-        spdlog::warn("Process {} did not exit gracefully, sending SIGKILL", name);
+        spdlog::warn("Process {} (pid={}) did not exit gracefully within {}ms, sending SIGKILL", name, pid, timeout_ms);
         ::kill(pid, SIGKILL);
         waitpid(pid, &status, 0);
     }
@@ -204,7 +217,8 @@ bool ProcessManager::stopProcess(const std::string& name, int timeout_ms) {
         output_threads_.erase(ot);
     }
 
-    spdlog::info("Process stopped: {}", name);
+    spdlog::info("Process stopped: {} (exit_code={})", name,
+                 it != processes_.end() ? it->second.exit_code : -1);
     if (on_state_change_) {
         on_state_change_(name, old_state, PluginState::STOPPED);
     }
@@ -291,13 +305,28 @@ void ProcessManager::monitorLoop() {
                 }
                 info.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
                 info.stopped_at = nowMs();
+                int64_t runtime_ms = (info.started_at > 0) ? (info.stopped_at - info.started_at) : 0;
                 info.pid = 0;
 
                 if (info.stdin_fd >= 0) { close(info.stdin_fd); info.stdin_fd = -1; }
                 if (info.stdout_fd >= 0) { close(info.stdout_fd); info.stdout_fd = -1; }
 
-                spdlog::warn("Process {} exited with status {} (state: {})",
-                            name, info.exit_code, pluginStateStr(info.state));
+                if (WIFEXITED(status)) {
+                    spdlog::warn("Process '{}' exited: exit_code={}, state={}, runtime={}ms",
+                                name, WEXITSTATUS(status), pluginStateStr(info.state), runtime_ms);
+                } else if (WIFSIGNALED(status)) {
+                    spdlog::error("Process '{}' killed by signal {}{}, state={}, runtime={}ms",
+                                 name, WTERMSIG(status),
+#ifdef WCOREDUMP
+                                 WCOREDUMP(status) ? " (core dumped)" : "",
+#else
+                                 "",
+#endif
+                                 pluginStateStr(info.state), runtime_ms);
+                } else {
+                    spdlog::warn("Process '{}' exited with raw status 0x{:x}, state={}, runtime={}ms",
+                                name, status, pluginStateStr(info.state), runtime_ms);
+                }
                 if (on_state_change_) {
                     on_state_change_(name, old_state, info.state);
                 }

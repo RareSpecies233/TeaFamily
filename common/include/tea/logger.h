@@ -21,7 +21,7 @@ public:
     }
 
     static void init(const std::string& name, const std::string& log_path,
-                     size_t max_size = 5 * 1024 * 1024, size_t max_files = 3) {
+                     size_t max_size = 20 * 1024 * 1024, size_t max_files = 5) {
         const std::string file_path = resolveLogFilePath(name, log_path);
         const auto file_parent = std::filesystem::path(file_path).parent_path();
         if (!file_parent.empty()) {
@@ -30,20 +30,40 @@ public:
 
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         console_sink->set_level(spdlog::level::info);
+        console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] %v");
 
         auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
             file_path, max_size, max_files);
         file_sink->set_level(spdlog::level::debug);
+        file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] [%t] [%s:%#] %v");
 
         auto logger = std::make_shared<spdlog::logger>(
             name, spdlog::sinks_init_list{console_sink, file_sink});
         logger->set_level(spdlog::level::debug);
-        logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] [%t] %v");
         logger->flush_on(spdlog::level::info);
 
         spdlog::set_default_logger(logger);
+        sinks_ = {console_sink, file_sink};
         active_log_path_ = file_path;
         spdlog::info("{} logger initialized, configured path: {}, active log file: {}", name, log_path, file_path);
+    }
+
+    // Get or create a named sub-logger that shares the same sinks (for plugin output).
+    static std::shared_ptr<spdlog::logger> getPluginLogger(const std::string& plugin_name) {
+        std::string logger_name = "plugin:" + plugin_name;
+        auto existing = spdlog::get(logger_name);
+        if (existing) return existing;
+
+        if (sinks_.empty()) {
+            // Fallback: no init() called yet, return default
+            return spdlog::default_logger();
+        }
+
+        auto logger = std::make_shared<spdlog::logger>(logger_name, sinks_.begin(), sinks_.end());
+        logger->set_level(spdlog::level::debug);
+        logger->flush_on(spdlog::level::info);
+        spdlog::register_logger(logger);
+        return logger;
     }
 
 private:
@@ -102,6 +122,7 @@ private:
     }
 
     inline static std::string active_log_path_;
+    inline static std::vector<spdlog::sink_ptr> sinks_;
 };
 
 } // namespace tea

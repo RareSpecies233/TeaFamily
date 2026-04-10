@@ -318,6 +318,9 @@ void LemonTea::heartbeatCheckLoop() {
 void LemonTea::handlePluginOutput(const std::string& plugin, const tea::json& msg) {
     std::string event = msg.value("event", msg.value("action", std::string("")));
 
+    spdlog::debug("Plugin '{}' output: event='{}', payload={}", plugin, event,
+                  msg.dump(-1, ' ', false, tea::json::error_handler_t::replace));
+
     if (event != "log") {
         recordPluginEvent(plugin, msg);
     }
@@ -351,6 +354,11 @@ void LemonTea::handlePluginOutput(const std::string& plugin, const tea::json& ms
         spdlog::info("Local plugin '{}' is ready", plugin);
     } else if (event == "error") {
         spdlog::error("Local plugin '{}' error: {}", plugin, msg.value("message", "unknown"));
+    } else if (event == "log") {
+        spdlog::info("[plugin:{}] {}", plugin, msg.value("message", ""));
+    } else if (!event.empty()) {
+        spdlog::debug("Local plugin '{}' event '{}': {}", plugin, event,
+                      msg.dump(-1, ' ', false, tea::json::error_handler_t::replace));
     }
 }
 

@@ -1,5 +1,6 @@
 #include "plugin_manager.h"
 #include <spdlog/spdlog.h>
+#include <tea/logger.h>
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
@@ -126,28 +127,51 @@ bool PluginManager::uninstallPlugin(const std::string& name) {
 
 bool PluginManager::startPlugin(const std::string& name) {
     process_mgr_.setOutputCallback([this](const std::string& pname, const std::string& line) {
-        if (!on_plugin_output_) return;
+        // Log every line of plugin stdout/stderr to a plugin-specific sub-logger
+        auto plog = tea::Logger::getPluginLogger(pname);
         try {
             auto j = tea::json::parse(line);
-            on_plugin_output_(pname, j);
+            std::string event = j.value("event", j.value("action", std::string("")));
+            std::string message = j.value("message", std::string(""));
+            if (event == "error") {
+                plog->error("[stdout] {}", line);
+            } else if (event == "log" && !message.empty()) {
+                plog->info("[stdout] {}", message);
+            } else {
+                plog->info("[stdout] {}", line);
+            }
+            if (on_plugin_output_) {
+                on_plugin_output_(pname, j);
+            }
         } catch (...) {
-            on_plugin_output_(pname, {{"event", "log"}, {"message", line}});
+            // Non-JSON output — treat as raw log line
+            plog->info("[stdout] {}", line);
+            if (on_plugin_output_) {
+                on_plugin_output_(pname, {{"event", "log"}, {"message", line}});
+            }
         }
     });
 
+    spdlog::info("Starting plugin '{}' ...", name);
     bool ok = process_mgr_.startProcess(name);
     if (ok) {
         tea::json cmd = {{"cmd", "start"}};
         process_mgr_.sendToProcess(name, cmd.dump());
+        spdlog::info("Plugin '{}' start command sent", name);
+    } else {
+        spdlog::error("Failed to start plugin '{}'", name);
     }
     return ok;
 }
 
 bool PluginManager::stopPlugin(const std::string& name) {
+    spdlog::info("Stopping plugin '{}' ...", name);
     tea::json cmd = {{"cmd", "stop"}};
     process_mgr_.sendToProcess(name, cmd.dump());
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    return process_mgr_.stopProcess(name);
+    bool ok = process_mgr_.stopProcess(name);
+    spdlog::info("Plugin '{}' stopped: {}", name, ok ? "ok" : "failed");
+    return ok;
 }
 
 void PluginManager::stopAll() {
