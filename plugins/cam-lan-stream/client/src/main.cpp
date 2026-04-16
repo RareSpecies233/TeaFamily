@@ -827,7 +827,8 @@ std::string buildMediaMtxConfigText(const CameraConfig& config, const std::strin
     out << "    rpiCameraHeight: " << config.height << "\n";
     out << "    rpiCameraFPS: " << config.fps << "\n";
     out << "    rpiCameraBitrate: " << config.bitrate << "\n";
-    out << "    rpiCameraCodec: hardwareH264\n";
+    out << "    rpiCameraCodec: softwareH264\n";
+    out << "    rpiCameraSoftwareH264Profile: 'high'\n";
     out << "    rpiCameraIDRPeriod: " << config.idr_period << "\n";
     out << "    rpiCameraBrightness: " << config.brightness << "\n";
     out << "    rpiCameraContrast: " << config.contrast << "\n";
